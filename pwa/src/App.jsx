@@ -481,8 +481,6 @@ function PrintedFields({ scan, conf, onChange, onItemChange, staffList }) {
     <>
       <div className="card">
         <div className="card-title">Transaction</div>
-        <EditableField label="Trnx Ref" value={scan.trnx_ref} confidence={conf.trnx_ref} onChange={v => onChange('trnx_ref', v)} />
-        <EditableField label="Manual Marking" value={scan.manual_marking} confidence={null} onChange={v => onChange('manual_marking', v)} />
         <EditableField label="Salesperson" value={scan.salesperson} confidence={null} onChange={v => onChange('salesperson', v)} staffList={staffList} />
         {scan.narration && (
           <EditableField label="Narration" value={scan.narration} confidence={null} onChange={v => onChange('narration', v)} />
@@ -596,7 +594,6 @@ function ItemsTable({ items, conf }) {
         <tr>
           <th>Item</th>
           <th>Qty</th>
-          <th className="amount">Amount</th>
         </tr>
       </thead>
       <tbody>
@@ -604,9 +601,6 @@ function ItemsTable({ items, conf }) {
           <tr key={i}>
             <td>{item.description}</td>
             <td className="qty">{item.qty ?? '—'}</td>
-            <td className="amount">
-              {item.amount != null ? `KSh ${Number(item.amount).toLocaleString()}` : '—'}
-            </td>
           </tr>
         ))}
       </tbody>
