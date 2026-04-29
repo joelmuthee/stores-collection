@@ -38,7 +38,7 @@ export default function App() {
     (async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 3072 } },
           audio: false,
         });
         if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
@@ -75,14 +75,36 @@ export default function App() {
     }
   };
 
-  const handleCapture = () => {
+  const handleCapture = async () => {
     const video = videoRef.current;
     if (!video?.videoWidth) return;
+
+    // Try ImageCapture API — uses full camera sensor resolution, not just video stream
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (track && typeof ImageCapture !== 'undefined') {
+      try {
+        const ic = new ImageCapture(track);
+        const blob = await ic.takePhoto();
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const dataUrl = e.target.result;
+          const base64 = dataUrl.split(',')[1];
+          setCapturedImage({ dataUrl, base64, mediaType: blob.type || 'image/jpeg' });
+          processImage(base64, blob.type || 'image/jpeg', scanType);
+        };
+        reader.readAsDataURL(blob);
+        return;
+      } catch (err) {
+        console.warn('ImageCapture failed, falling back to canvas:', err);
+      }
+    }
+
+    // Fallback: canvas capture from video frame
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
     const base64 = dataUrl.split(',')[1];
     setCapturedImage({ dataUrl, base64, mediaType: 'image/jpeg' });
     processImage(base64, 'image/jpeg', scanType);

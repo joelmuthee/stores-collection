@@ -5,7 +5,13 @@ async function post(body) {
     method: 'POST',
     body: JSON.stringify(body),
   });
-  return res.json();
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    console.error('Apps Script raw response:', text.slice(0, 800));
+    return { ok: false, error: 'Server error — check console for details.' };
+  }
 }
 
 export const runOcr = (image, mediaType, type) =>
