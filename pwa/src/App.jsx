@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { runOcr, saveScan } from './api.js';
+import { runOcr, saveScan, getStaff } from './api.js';
 
 function todayDDMMYYYY() {
   const d = new Date();
@@ -41,6 +41,7 @@ export default function App() {
   const [dupeBanner, setDupeBanner] = useState(null);
   const [successData, setSuccessData] = useState(null);
   const [notes, setNotes] = useState('');
+  const [staffList, setStaffList] = useState([]);
   const toastTimer = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -80,6 +81,12 @@ export default function App() {
     })();
     return () => { cancelled = true; stopCamera(); };
   }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    getStaff().then(res => {
+      if (res?.staff) setStaffList(res.staff.map(s => s.name).filter(Boolean));
+    }).catch(() => {});
+  }, []);
 
   const processImage = async (base64, mediaType, type) => {
     setDupeBanner(null);
@@ -234,6 +241,7 @@ export default function App() {
         <ManualEntryScreen
           scanType={scanType}
           employee={employee}
+          staffList={staffList}
           onSubmit={handleManualSubmit}
           onBack={() => setScreen('home')}
         />
@@ -257,6 +265,7 @@ export default function App() {
           editedScan={editedScan}
           image={capturedImage?.dataUrl}
           employee={employee}
+          staffList={staffList}
           dupeBanner={dupeBanner}
           notes={notes}
           onNotesChange={setNotes}
@@ -328,12 +337,6 @@ function HomeScreen({ scanType, setScanType, employee, onEditEmployee, onScan, o
         ✏️ Enter Manually
       </button>
 
-      <div className="employee-row">
-        <span>Employee:</span>
-        <span className="employee-name" onClick={onEditEmployee}>
-          {employee || 'tap to set'}
-        </span>
-      </div>
     </div>
   );
 }
@@ -389,7 +392,7 @@ function ProcessingScreen({ image, text }) {
 // ReviewScreen
 // ─────────────────────────────────────────────
 function ReviewScreen({
-  scan, editedScan, image, employee,
+  scan, editedScan, image, employee, staffList,
   dupeBanner, notes, onNotesChange,
   onFieldChange, onItemChange,
   onSubmit, onForceSubmit, onBack,
@@ -410,6 +413,12 @@ function ReviewScreen({
           <span>✕</span>
         </button>
       </div>
+
+      {staffList?.length > 0 && (
+        <datalist id="staff-datalist">
+          {staffList.map(name => <option key={name} value={name} />)}
+        </datalist>
+      )}
 
       <div className="review-body">
         {image && <img className="review-image" src={image} alt="Scanned receipt" />}
@@ -434,8 +443,8 @@ function ReviewScreen({
         )}
 
         {isPrinted
-          ? <PrintedFields scan={editedScan} conf={conf} onChange={onFieldChange} onItemChange={onItemChange} />
-          : <HandwrittenFields scan={editedScan} conf={conf} onChange={onFieldChange} onItemChange={onItemChange} />
+          ? <PrintedFields scan={editedScan} conf={conf} onChange={onFieldChange} onItemChange={onItemChange} staffList={staffList} />
+          : <HandwrittenFields scan={editedScan} conf={conf} onChange={onFieldChange} onItemChange={onItemChange} staffList={staffList} />
         }
 
         <div className="card">
@@ -467,14 +476,14 @@ function ReviewScreen({
   );
 }
 
-function PrintedFields({ scan, conf, onChange, onItemChange }) {
+function PrintedFields({ scan, conf, onChange, onItemChange, staffList }) {
   return (
     <>
       <div className="card">
         <div className="card-title">Transaction</div>
         <EditableField label="Trnx Ref" value={scan.trnx_ref} confidence={conf.trnx_ref} onChange={v => onChange('trnx_ref', v)} />
         <EditableField label="Manual Marking" value={scan.manual_marking} confidence={null} onChange={v => onChange('manual_marking', v)} />
-        <EditableField label="Salesperson" value={scan.salesperson} confidence={null} onChange={v => onChange('salesperson', v)} />
+        <EditableField label="Salesperson" value={scan.salesperson} confidence={null} onChange={v => onChange('salesperson', v)} staffList={staffList} />
         {scan.narration && (
           <EditableField label="Narration" value={scan.narration} confidence={null} onChange={v => onChange('narration', v)} />
         )}
@@ -519,14 +528,14 @@ function PrintedFields({ scan, conf, onChange, onItemChange }) {
   );
 }
 
-function HandwrittenFields({ scan, conf, onChange, onItemChange }) {
+function HandwrittenFields({ scan, conf, onChange, onItemChange, staffList }) {
   return (
     <>
       <div className="card">
         <div className="card-title">Note Details</div>
         <EditableField label="Customer" value={scan.customer_name} confidence={conf.customer_name} onChange={v => onChange('customer_name', v)} />
         <EditableField label="Date" value={scan.date} confidence={null} onChange={v => onChange('date', v)} />
-        <EditableField label="Salesperson" value={scan.salesperson} confidence={null} onChange={v => onChange('salesperson', v)} />
+        <EditableField label="Salesperson" value={scan.salesperson} confidence={null} onChange={v => onChange('salesperson', v)} staffList={staffList} />
       </div>
 
       <div className="card">
@@ -541,8 +550,9 @@ function HandwrittenFields({ scan, conf, onChange, onItemChange }) {
 // EditableField — read-only by default, opens for editing on tap.
 // Low/medium confidence fields open immediately.
 // ─────────────────────────────────────────────
-function EditableField({ label, value, confidence, onChange }) {
+function EditableField({ label, value, confidence, onChange, staffList }) {
   const [editing, setEditing] = useState(confidence === 'low' || confidence === 'medium');
+  const hasStaff = staffList?.length > 0;
 
   if (editing) {
     return (
@@ -552,6 +562,7 @@ function EditableField({ label, value, confidence, onChange }) {
           className={`field-input${confidence === 'low' ? ' warn' : ''}`}
           value={value ?? ''}
           onChange={e => onChange(e.target.value)}
+          list={hasStaff ? 'staff-datalist' : undefined}
         />
         {confidence && confidence !== 'high' && <ConfBadge level={confidence} />}
       </div>
@@ -669,7 +680,7 @@ function ConfBadge({ level }) {
 // ─────────────────────────────────────────────
 // ManualEntryScreen
 // ─────────────────────────────────────────────
-function ManualEntryScreen({ scanType, employee, onSubmit, onBack }) {
+function ManualEntryScreen({ scanType, employee, staffList, onSubmit, onBack }) {
   const [receiptType, setReceiptType] = useState(scanType || 'printed');
   const [salesperson, setSalesperson] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -734,9 +745,14 @@ function ManualEntryScreen({ scanType, employee, onSubmit, onBack }) {
               <input className="field-input" value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Customer name" />
             </div>
           )}
+          {staffList?.length > 0 && (
+            <datalist id="staff-datalist">
+              {staffList.map(name => <option key={name} value={name} />)}
+            </datalist>
+          )}
           <div className="field-row">
             <span className="field-label">Salesperson</span>
-            <input className="field-input" value={salesperson} onChange={e => setSalesperson(e.target.value)} placeholder="Name" />
+            <input className="field-input" value={salesperson} onChange={e => setSalesperson(e.target.value)} placeholder="Name" list={staffList?.length ? 'staff-datalist' : undefined} />
           </div>
           <div className="field-row">
             <span className="field-label">Date</span>
