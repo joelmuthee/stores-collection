@@ -1,0 +1,12 @@
+{
+  "name": "oloolua-stores-collection-system",
+  "version": "0.1.0",
+  "description": "Digital collection system for Oloolua Hardware Stores",
+  "type": "module",
+  "scripts": {
+    "test:ocr": "node --env-file=.env cli/ocr.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0"
+  }
+}

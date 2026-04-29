@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:olooluahardware.com)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__computer",
+      "mcp__Claude_in_Chrome__javascript_tool",
+      "Bash(npm install *)",
+      "Bash(node -e \"require\\('dotenv/config'\\); console.log\\(process.env.ANTHROPIC_API_KEY ? 'SET \\(length: ' + process.env.ANTHROPIC_API_KEY.length + '\\)' : 'NOT SET'\\)\")",
+      "Bash(node cli/ocr.js)",
+      "Bash(node -e \"import\\('dotenv/config'\\).then\\(\\(\\) => console.log\\('KEY:', process.env.ANTHROPIC_API_KEY ? 'SET' : 'NOT SET'\\)\\)\")",
+      "Bash(node -e \"import {config} from 'dotenv'; const r = config\\(\\); console.log\\('result:', JSON.stringify\\(r\\)\\); console.log\\('KEY:', process.env.ANTHROPIC_API_KEY ? 'SET length=' + process.env.ANTHROPIC_API_KEY.length : 'NOT SET'\\)\")",
+      "Bash(node --env-file=.env cli/ocr.js)",
+      "Bash(node --env-file=.env -e \"console.log\\('KEY:', process.env.ANTHROPIC_API_KEY ? 'SET len=' + process.env.ANTHROPIC_API_KEY.length : 'NOT SET'\\)\")",
+      "Bash(xxd)",
+      "Bash(node --env-file=\"C:\\\\Users\\\\Joel\\\\Website Designs\\\\stores-collection-system\\\\.env\" -e \"console.log\\('KEY:', process.env.ANTHROPIC_API_KEY ? 'SET' : 'NOT SET'\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(node cli/ocr.js samples/20260429_105517.jpg handwritten)",
+      "Bash(node cli/ocr.js samples/20260429_105805.jpg printed)",
+      "Bash(curl -sL \"https://script.google.com/macros/s/AKfycbwNeplswxhv5OOZjqpj7TKO8-UCATN3F_skgmKeqxBT9ILIJ5A4GVN4D6h4521yqWf_1g/exec\")",
+      "Bash(curl -sL --max-redirs 10 \"https://script.google.com/macros/s/AKfycbyWQcmMTMlBjW9zVk8DzKNfej6Pb5KDb8j682LDFEwkZ8Yxvoa4gq1_xz-caWE9aLEhgA/exec\")",
+      "Bash(python3 -c \"import sys; d=sys.stdin.read\\(\\); print\\(d[:500] if '<html' in d else d\\)\")",
+      "Bash(npm create *)",
+      "Bash(npm run *)",
+      "Bash(git init *)",
+      "Bash(git remote *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}

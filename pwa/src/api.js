@@ -1,0 +1,24 @@
+const BASE = import.meta.env.VITE_WEB_APP_URL;
+
+async function post(body) {
+  const res = await fetch(BASE, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+export const runOcr = (image, mediaType, type) =>
+  post({ action: 'ocr', image, mediaType, type });
+
+export const saveScan = (payload) =>
+  post({ action: 'saveScan', ...payload });
+
+export const getStaff = () =>
+  fetch(`${BASE}?action=getStaff`).then(r => r.json());
+
+export const getProductSuggestions = (query) =>
+  post({ action: 'getProductSuggestions', query });
+
+export const addAlias = (alias, canonical) =>
+  post({ action: 'addAlias', alias, canonical });
