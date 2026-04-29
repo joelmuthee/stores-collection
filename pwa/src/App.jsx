@@ -676,8 +676,7 @@ function ManualEntryScreen({ scanType, employee, onSubmit, onBack }) {
   const [date, setDate] = useState(todayDDMMYYYY());
   const [time, setTime] = useState(nowHHMM());
   const [paymentMethod, setPaymentMethod] = useState('Cash');
-  const [items, setItems] = useState([{ description: '', qty: '', amount: '', unit: '' }]);
-  const [total, setTotal] = useState('');
+  const [items, setItems] = useState([{ description: '', qty: '', unit: '' }]);
   const [notes, setNotes] = useState('');
 
   const addItem = () => setItems(p => [...p, { description: '', qty: '', amount: '', unit: '' }]);
@@ -695,8 +694,7 @@ function ManualEntryScreen({ scanType, employee, onSubmit, onBack }) {
       date, time,
       payment_method: paymentMethod,
       status: 'paid',
-      items: cleanItems.map(it => ({ description: it.description, qty: parseFloat(it.qty) || null, amount: parseFloat(it.amount) || null })),
-      total: parseFloat(total) || null,
+      items: cleanItems.map(it => ({ description: it.description, qty: parseFloat(it.qty) || null })),
       confidence: { trnx_ref: 'high', total: 'high', items: 'high' },
     } : {
       receipt_type: 'handwritten',
@@ -773,12 +771,8 @@ function ManualEntryScreen({ scanType, employee, onSubmit, onBack }) {
               <div style={{ display: 'flex', gap: 6 }}>
                 <input className="field-input" style={{ flex: 1 }} placeholder="Qty" type="number"
                   value={item.qty} onChange={e => updateItem(i, 'qty', e.target.value)} />
-                {receiptType === 'printed'
-                  ? <input className="field-input" style={{ flex: 1 }} placeholder="Amount (KSh)" type="number"
-                      value={item.amount} onChange={e => updateItem(i, 'amount', e.target.value)} />
-                  : <input className="field-input" style={{ flex: 1 }} placeholder="Unit (pcs/kg/rolls)"
-                      value={item.unit} onChange={e => updateItem(i, 'unit', e.target.value)} />
-                }
+                <input className="field-input" style={{ flex: 1 }} placeholder="Unit (pcs/kg/rolls)"
+                  value={item.unit} onChange={e => updateItem(i, 'unit', e.target.value)} />
               </div>
             </div>
           ))}
@@ -788,13 +782,6 @@ function ManualEntryScreen({ scanType, employee, onSubmit, onBack }) {
               + Add item
             </button>
           </div>
-          {receiptType === 'printed' && (
-            <div className="total-row">
-              <span>Total</span>
-              <input className="field-input" type="number" placeholder="0" value={total}
-                onChange={e => setTotal(e.target.value)} style={{ width: 120, textAlign: 'right' }} />
-            </div>
-          )}
         </div>
 
         <div className="card">
