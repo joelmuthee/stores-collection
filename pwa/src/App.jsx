@@ -671,8 +671,6 @@ function ConfBadge({ level }) {
 // ─────────────────────────────────────────────
 function ManualEntryScreen({ scanType, employee, onSubmit, onBack }) {
   const [receiptType, setReceiptType] = useState(scanType || 'printed');
-  const [trnxRef, setTrnxRef] = useState('');
-  const [manualMarking, setManualMarking] = useState('');
   const [salesperson, setSalesperson] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [date, setDate] = useState(todayDDMMYYYY());
@@ -693,8 +691,6 @@ function ManualEntryScreen({ scanType, employee, onSubmit, onBack }) {
     const scan = receiptType === 'printed' ? {
       receipt_type: 'printed',
       document_label: 'MANUAL',
-      trnx_ref: trnxRef.trim() || null,
-      manual_marking: manualMarking.trim() || null,
       salesperson: salesperson.trim() || null,
       date, time,
       payment_method: paymentMethod,
@@ -734,16 +730,6 @@ function ManualEntryScreen({ scanType, employee, onSubmit, onBack }) {
 
         <div className="card">
           <div className="card-title">{receiptType === 'printed' ? 'Transaction' : 'Note Details'}</div>
-          {receiptType === 'printed' && <>
-            <div className="field-row">
-              <span className="field-label">Trnx Ref</span>
-              <input className="field-input" value={trnxRef} onChange={e => setTrnxRef(e.target.value)} placeholder="e.g. 12345" />
-            </div>
-            <div className="field-row">
-              <span className="field-label">Manual Marking</span>
-              <input className="field-input" value={manualMarking} onChange={e => setManualMarking(e.target.value)} placeholder="e.g. INVOICE/8403" />
-            </div>
-          </>}
           {receiptType === 'handwritten' && (
             <div className="field-row">
               <span className="field-label">Customer</span>
