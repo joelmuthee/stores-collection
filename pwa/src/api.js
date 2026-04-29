@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_WEB_APP_URL;
+const BASE = 'https://script.google.com/macros/s/AKfycbyWQcmMTMlBjW9zVk8DzKNfej6Pb5KDb8j682LDFEwkZ8Yxvoa4gq1_xz-caWE9aLEhgA/exec';
 
 async function post(body) {
   const res = await fetch(BASE, {
