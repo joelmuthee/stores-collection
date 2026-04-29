@@ -1,6 +1,33 @@
 import { useState, useRef, useEffect } from 'react';
 import { runOcr, saveScan } from './api.js';
 
+function todayDDMMYYYY() {
+  const d = new Date();
+  return [d.getDate(), d.getMonth() + 1, d.getFullYear()]
+    .map(n => String(n).padStart(2, '0')).join('-');
+}
+function nowHHMM() {
+  const d = new Date();
+  return [d.getHours(), d.getMinutes()].map(n => String(n).padStart(2, '0')).join(':');
+}
+// Resize a Blob to max `maxDim` px on the longest side, returns a new JPEG Blob
+function resizeBlob(blob, maxDim = 2000) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(resolve, 'image/jpeg', 0.92);
+    };
+    img.src = url;
+  });
+}
+
 export default function App() {
   const [screen, setScreen] = useState('home');
   const [scanType, setScanType] = useState('printed');
@@ -79,35 +106,39 @@ export default function App() {
     const video = videoRef.current;
     if (!video?.videoWidth) return;
 
-    // Try ImageCapture API — uses full camera sensor resolution, not just video stream
+    let rawBlob = null;
+
+    // Try ImageCapture API — full sensor resolution
     const track = streamRef.current?.getVideoTracks()[0];
     if (track && typeof ImageCapture !== 'undefined') {
       try {
         const ic = new ImageCapture(track);
-        const blob = await ic.takePhoto();
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const dataUrl = e.target.result;
-          const base64 = dataUrl.split(',')[1];
-          setCapturedImage({ dataUrl, base64, mediaType: blob.type || 'image/jpeg' });
-          processImage(base64, blob.type || 'image/jpeg', scanType);
-        };
-        reader.readAsDataURL(blob);
-        return;
+        rawBlob = await ic.takePhoto();
       } catch (err) {
         console.warn('ImageCapture failed, falling back to canvas:', err);
       }
     }
 
-    // Fallback: canvas capture from video frame
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-    const base64 = dataUrl.split(',')[1];
-    setCapturedImage({ dataUrl, base64, mediaType: 'image/jpeg' });
-    processImage(base64, 'image/jpeg', scanType);
+    if (!rawBlob) {
+      // Fallback: canvas from video frame
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      rawBlob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.95));
+    }
+
+    // Resize to max 2000px — keeps OCR quality but avoids huge payloads
+    const blob = await resizeBlob(rawBlob, 2000);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target.result;
+      const base64 = dataUrl.split(',')[1];
+      setCapturedImage({ dataUrl, base64, mediaType: 'image/jpeg' });
+      processImage(base64, 'image/jpeg', scanType);
+    };
+    reader.readAsDataURL(blob);
   };
 
   const handleFileChange = (e) => {
@@ -154,6 +185,29 @@ export default function App() {
     }
   };
 
+  const handleManualSubmit = async (manualScan, notes) => {
+    setProcessingText('Saving…');
+    setScreen('processing');
+    try {
+      const res = await saveScan({ scan: manualScan, stores_employee: employee || undefined, notes: notes || undefined });
+      if (!res.ok && res.duplicate) {
+        showToast('Duplicate Trnx Ref — already saved.');
+        setScreen('manual');
+        return;
+      }
+      if (!res.ok) {
+        showToast(res.error || 'Save failed. Try again.');
+        setScreen('manual');
+        return;
+      }
+      setSuccessData({ trnx_ref: manualScan?.trnx_ref, flags: res.flags });
+      setScreen('success');
+    } catch {
+      showToast('Network error. Check your connection.');
+      setScreen('manual');
+    }
+  };
+
   const handleScanAnother = () => {
     setScan(null);
     setEditedScan(null);
@@ -173,6 +227,15 @@ export default function App() {
           employee={employee}
           onEditEmployee={() => setShowNameModal(true)}
           onScan={() => setScreen('camera')}
+          onManual={() => setScreen('manual')}
+        />
+      )}
+      {screen === 'manual' && (
+        <ManualEntryScreen
+          scanType={scanType}
+          employee={employee}
+          onSubmit={handleManualSubmit}
+          onBack={() => setScreen('home')}
         />
       )}
       {screen === 'camera' && (
@@ -231,7 +294,7 @@ export default function App() {
 // ─────────────────────────────────────────────
 // HomeScreen
 // ─────────────────────────────────────────────
-function HomeScreen({ scanType, setScanType, employee, onEditEmployee, onScan }) {
+function HomeScreen({ scanType, setScanType, employee, onEditEmployee, onScan, onManual }) {
   return (
     <div className="screen home">
       <div className="home-logo">
@@ -259,6 +322,10 @@ function HomeScreen({ scanType, setScanType, employee, onEditEmployee, onScan })
 
       <button className="btn-scan" onClick={onScan}>
         <span>📷</span> Scan
+      </button>
+
+      <button className="btn-secondary" onClick={onManual} style={{ width: '100%', padding: '14px', borderRadius: '14px', fontSize: '15px' }}>
+        ✏️ Enter Manually
       </button>
 
       <div className="employee-row">
@@ -597,6 +664,174 @@ function SuccessScreen({ data, onScanAnother }) {
 function ConfBadge({ level }) {
   if (!level || level === 'high') return null;
   return <span className={`conf-badge conf-${level}`}>{level.toUpperCase()}</span>;
+}
+
+// ─────────────────────────────────────────────
+// ManualEntryScreen
+// ─────────────────────────────────────────────
+function ManualEntryScreen({ scanType, employee, onSubmit, onBack }) {
+  const [receiptType, setReceiptType] = useState(scanType || 'printed');
+  const [trnxRef, setTrnxRef] = useState('');
+  const [manualMarking, setManualMarking] = useState('');
+  const [salesperson, setSalesperson] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [date, setDate] = useState(todayDDMMYYYY());
+  const [time, setTime] = useState(nowHHMM());
+  const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [items, setItems] = useState([{ description: '', qty: '', amount: '', unit: '' }]);
+  const [total, setTotal] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const addItem = () => setItems(p => [...p, { description: '', qty: '', amount: '', unit: '' }]);
+  const removeItem = (i) => setItems(p => p.filter((_, idx) => idx !== i));
+  const updateItem = (i, field, val) => setItems(p => {
+    const next = [...p]; next[i] = { ...next[i], [field]: val }; return next;
+  });
+
+  const handleSubmit = () => {
+    const cleanItems = items.filter(it => it.description.trim());
+    const scan = receiptType === 'printed' ? {
+      receipt_type: 'printed',
+      document_label: 'MANUAL',
+      trnx_ref: trnxRef.trim() || null,
+      manual_marking: manualMarking.trim() || null,
+      salesperson: salesperson.trim() || null,
+      date, time,
+      payment_method: paymentMethod,
+      status: 'paid',
+      items: cleanItems.map(it => ({ description: it.description, qty: parseFloat(it.qty) || null, amount: parseFloat(it.amount) || null })),
+      total: parseFloat(total) || null,
+      confidence: { trnx_ref: 'high', total: 'high', items: 'high' },
+    } : {
+      receipt_type: 'handwritten',
+      customer_name: customerName.trim() || null,
+      salesperson: salesperson.trim() || null,
+      date,
+      items: cleanItems.map(it => ({ description: it.description, qty: parseFloat(it.qty) || null, unit: it.unit || null })),
+      confidence: { customer_name: 'high', items: 'high' },
+    };
+    onSubmit(scan, notes);
+  };
+
+  return (
+    <div className="screen review-screen">
+      <div className="topbar">
+        <h1>✏️ Manual Entry</h1>
+        <button className="btn-icon" onClick={onBack} style={{ color: 'var(--text-muted)' }}>
+          <span>✕</span>
+        </button>
+      </div>
+
+      <div className="review-body">
+        <div className="scan-type-row" style={{ marginBottom: 0 }}>
+          <button className={`scan-type-btn${receiptType === 'printed' ? ' active' : ''}`} onClick={() => setReceiptType('printed')}>
+            <span className="scan-type-icon">🧾</span>Printed
+          </button>
+          <button className={`scan-type-btn${receiptType === 'handwritten' ? ' active' : ''}`} onClick={() => setReceiptType('handwritten')}>
+            <span className="scan-type-icon">✍️</span>Handwritten
+          </button>
+        </div>
+
+        <div className="card">
+          <div className="card-title">{receiptType === 'printed' ? 'Transaction' : 'Note Details'}</div>
+          {receiptType === 'printed' && <>
+            <div className="field-row">
+              <span className="field-label">Trnx Ref</span>
+              <input className="field-input" value={trnxRef} onChange={e => setTrnxRef(e.target.value)} placeholder="e.g. 12345" />
+            </div>
+            <div className="field-row">
+              <span className="field-label">Manual Marking</span>
+              <input className="field-input" value={manualMarking} onChange={e => setManualMarking(e.target.value)} placeholder="e.g. INVOICE/8403" />
+            </div>
+          </>}
+          {receiptType === 'handwritten' && (
+            <div className="field-row">
+              <span className="field-label">Customer</span>
+              <input className="field-input" value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Customer name" />
+            </div>
+          )}
+          <div className="field-row">
+            <span className="field-label">Salesperson</span>
+            <input className="field-input" value={salesperson} onChange={e => setSalesperson(e.target.value)} placeholder="Name" />
+          </div>
+          <div className="field-row">
+            <span className="field-label">Date</span>
+            <input className="field-input" value={date} onChange={e => setDate(e.target.value)} placeholder="DD-MM-YYYY" />
+          </div>
+          {receiptType === 'printed' && <>
+            <div className="field-row">
+              <span className="field-label">Time</span>
+              <input className="field-input" value={time} onChange={e => setTime(e.target.value)} placeholder="HH:MM" />
+            </div>
+            <div className="field-row">
+              <span className="field-label">Payment</span>
+              <select className="field-input" value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
+                <option>Cash</option><option>Mpesa</option><option>Bank</option><option>other</option>
+              </select>
+            </div>
+          </>}
+        </div>
+
+        <div className="card">
+          <div className="card-title">Items</div>
+          {items.map((item, i) => (
+            <div key={i} style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input className="field-input" style={{ flex: 1 }} placeholder="Item description"
+                  value={item.description} onChange={e => updateItem(i, 'description', e.target.value)} />
+                {items.length > 1 && (
+                  <button onClick={() => removeItem(i)}
+                    style={{ background: 'none', border: 'none', color: 'var(--danger)', fontSize: 20, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>×</button>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input className="field-input" style={{ flex: 1 }} placeholder="Qty" type="number"
+                  value={item.qty} onChange={e => updateItem(i, 'qty', e.target.value)} />
+                {receiptType === 'printed'
+                  ? <input className="field-input" style={{ flex: 1 }} placeholder="Amount (KSh)" type="number"
+                      value={item.amount} onChange={e => updateItem(i, 'amount', e.target.value)} />
+                  : <input className="field-input" style={{ flex: 1 }} placeholder="Unit (pcs/kg/rolls)"
+                      value={item.unit} onChange={e => updateItem(i, 'unit', e.target.value)} />
+                }
+              </div>
+            </div>
+          ))}
+          <div style={{ padding: '10px 14px' }}>
+            <button onClick={addItem}
+              style={{ background: 'none', border: '1px dashed var(--border)', borderRadius: 8, color: 'var(--text-muted)', padding: '8px 16px', width: '100%', cursor: 'pointer', fontSize: 13 }}>
+              + Add item
+            </button>
+          </div>
+          {receiptType === 'printed' && (
+            <div className="total-row">
+              <span>Total</span>
+              <input className="field-input" type="number" placeholder="0" value={total}
+                onChange={e => setTotal(e.target.value)} style={{ width: 120, textAlign: 'right' }} />
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-title">Notes</div>
+          <div className="field-row">
+            <textarea className="field-input" placeholder="Optional notes…" value={notes}
+              onChange={e => setNotes(e.target.value)} rows={2} style={{ resize: 'none', width: '100%' }} />
+          </div>
+        </div>
+
+        {employee && (
+          <p style={{ textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)', paddingBottom: 4 }}>
+            Submitting as <strong style={{ color: 'var(--gold)' }}>{employee}</strong>
+          </p>
+        )}
+      </div>
+
+      <div className="bottom-bar">
+        <button className="btn-secondary" onClick={onBack}>Back</button>
+        <button className="btn-primary" onClick={handleSubmit}>Submit</button>
+      </div>
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────
