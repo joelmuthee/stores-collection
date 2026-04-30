@@ -601,6 +601,7 @@ function getPendingCollections() {
           rowNum: i + 2,
           timestamp: row[0],
           receipt_type: row[1],
+          trnx_ref: row[2],
           customer_name: row[4],
           salesperson: row[5],
           sale_date: row[7],

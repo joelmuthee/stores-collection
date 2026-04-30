@@ -299,10 +299,15 @@ export default function App() {
     <>
       {screen === 'home' && (
         <HomeScreen
-          onScanPrinted={() => { setScanType('printed'); setFlowMode('collect'); setScreen('camera'); }}
-          onAuthorize={() => { setScanType('handwritten'); setFlowMode('authorize'); setScreen('camera'); }}
-          onVerify={() => { setFlowMode('collect'); openPendingList(); }}
+          onScan={() => { setFlowMode('authorize'); setScreen('scanTypePicker'); }}
+          onAuthorize={() => { setFlowMode('collect'); openPendingList(); }}
           onManual={() => { setScanType('handwritten'); setFlowMode('collect'); setScreen('manual'); }}
+        />
+      )}
+      {screen === 'scanTypePicker' && (
+        <ScanTypePickerScreen
+          onPick={(type) => { setScanType(type); setScreen('camera'); }}
+          onBack={() => setScreen('home')}
         />
       )}
       {screen === 'pending' && (
@@ -400,16 +405,16 @@ export default function App() {
 // ─────────────────────────────────────────────
 // HomeScreen
 // ─────────────────────────────────────────────
-function HomeScreen({ onScanPrinted, onAuthorize, onVerify, onManual }) {
+function HomeScreen({ onScan, onAuthorize, onManual }) {
   const cardStyle = {
     display: 'flex', alignItems: 'center', gap: 14,
-    padding: '18px 18px', background: 'var(--surface)',
+    padding: '20px 18px', background: 'var(--surface)',
     border: '1px solid var(--border)', borderRadius: 16,
     width: '100%', textAlign: 'left', cursor: 'pointer',
     color: 'var(--text)', fontSize: 15,
   };
-  const iconStyle = { fontSize: 28, lineHeight: 1 };
-  const titleStyle = { fontWeight: 600, fontSize: 16 };
+  const iconStyle = { fontSize: 32, lineHeight: 1 };
+  const titleStyle = { fontWeight: 600, fontSize: 17 };
   const subStyle = { fontSize: 12, color: 'var(--text-muted)', marginTop: 2 };
 
   return (
@@ -420,27 +425,19 @@ function HomeScreen({ onScanPrinted, onAuthorize, onVerify, onManual }) {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
-        <button style={cardStyle} onClick={onScanPrinted}>
-          <span style={iconStyle}>🧾</span>
+        <button style={cardStyle} onClick={onScan}>
+          <span style={iconStyle}>📷</span>
           <div>
-            <div style={titleStyle}>Scan Printed Receipt</div>
-            <div style={subStyle}>Customer collecting with Urovo receipt</div>
-          </div>
-        </button>
-
-        <button style={cardStyle} onClick={onVerify}>
-          <span style={iconStyle}>📋</span>
-          <div>
-            <div style={titleStyle}>Verify Collection (Stores)</div>
-            <div style={subStyle}>Customer brought a handwritten note</div>
+            <div style={titleStyle}>Scan Receipt (Shop)</div>
+            <div style={subStyle}>Salesperson logs a receipt or note</div>
           </div>
         </button>
 
         <button style={cardStyle} onClick={onAuthorize}>
-          <span style={iconStyle}>✍️</span>
+          <span style={iconStyle}>✅</span>
           <div>
-            <div style={titleStyle}>Authorize Note (Salesperson)</div>
-            <div style={subStyle}>Log a note you just issued</div>
+            <div style={titleStyle}>Authorize Collection (Stores)</div>
+            <div style={subStyle}>Customer is here to collect</div>
           </div>
         </button>
       </div>
@@ -448,6 +445,51 @@ function HomeScreen({ onScanPrinted, onAuthorize, onVerify, onManual }) {
       <button className="btn-secondary" onClick={onManual} style={{ width: '100%', padding: '12px', borderRadius: 12, fontSize: 13, marginTop: 8 }}>
         ✏️ Enter Manually
       </button>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// ScanTypePickerScreen — printed or handwritten?
+// ─────────────────────────────────────────────
+function ScanTypePickerScreen({ onPick, onBack }) {
+  const cardStyle = {
+    display: 'flex', alignItems: 'center', gap: 14,
+    padding: '20px 18px', background: 'var(--surface)',
+    border: '1px solid var(--border)', borderRadius: 16,
+    width: '100%', textAlign: 'left', cursor: 'pointer',
+    color: 'var(--text)', fontSize: 15,
+  };
+  const iconStyle = { fontSize: 32, lineHeight: 1 };
+  const titleStyle = { fontWeight: 600, fontSize: 17 };
+  const subStyle = { fontSize: 12, color: 'var(--text-muted)', marginTop: 2 };
+
+  return (
+    <div className="screen home">
+      <div className="topbar" style={{ width: '100%' }}>
+        <h1>What are you scanning?</h1>
+        <button className="btn-icon" onClick={onBack} style={{ color: 'var(--text-muted)' }}>
+          <span>←</span>
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
+        <button style={cardStyle} onClick={() => onPick('printed')}>
+          <span style={iconStyle}>🧾</span>
+          <div>
+            <div style={titleStyle}>Printed Receipt</div>
+            <div style={subStyle}>From the Urovo POS</div>
+          </div>
+        </button>
+
+        <button style={cardStyle} onClick={() => onPick('handwritten')}>
+          <span style={iconStyle}>✍️</span>
+          <div>
+            <div style={titleStyle}>Handwritten Note</div>
+            <div style={subStyle}>Collection note from a salesperson</div>
+          </div>
+        </button>
+      </div>
     </div>
   );
 }
@@ -489,10 +531,10 @@ function PendingListScreen({ pending, onSelect, onBack, onRefresh }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 16, color: 'var(--text)' }}>
-                  {p.customer_name || '(no customer name)'}
+                  {p.customer_name || (p.trnx_ref ? `Trnx ${p.trnx_ref}` : '(no name)')}
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
-                  by {p.salesperson || '—'} {p.sale_date && `· ${p.sale_date}`}
+                  {p.receipt_type === 'printed' ? '🧾' : '✍️'} by {p.salesperson || '—'} {p.sale_date && `· ${p.sale_date}`}
                 </div>
                 {p.item_summary && (
                   <div style={{
@@ -522,12 +564,14 @@ function PendingListScreen({ pending, onSelect, onBack, onRefresh }) {
 // VerifyScreen — compare salesperson's photo with customer's note
 // ─────────────────────────────────────────────
 function VerifyScreen({ pending, employee, onEmployeeChange, onConfirm, onReject, onBack }) {
+  const isPrinted = pending.receipt_type === 'printed';
+  const headerLabel = pending.customer_name || (pending.trnx_ref ? `Trnx ${pending.trnx_ref}` : '(no name)');
   return (
     <div className="screen review-screen">
       <div className="topbar">
         <div>
-          <h1>🔍 Verify Note</h1>
-          <div className="topbar-sub">{pending.customer_name || '(no name)'}</div>
+          <h1>🔍 Verify {isPrinted ? 'Receipt' : 'Note'}</h1>
+          <div className="topbar-sub">{headerLabel}</div>
         </div>
         <button className="btn-icon" onClick={onBack} style={{ color: 'var(--text-muted)' }}>
           <span>←</span>
@@ -566,7 +610,8 @@ function VerifyScreen({ pending, employee, onEmployeeChange, onConfirm, onReject
         <div className="card">
           <div className="card-title">Details</div>
           <div style={{ fontSize: 14, lineHeight: 1.7 }}>
-            <div><strong>Customer:</strong> {pending.customer_name || '—'}</div>
+            {pending.trnx_ref && <div><strong>Trnx Ref:</strong> {pending.trnx_ref}</div>}
+            {pending.customer_name && <div><strong>Customer:</strong> {pending.customer_name}</div>}
             <div><strong>Salesperson:</strong> {pending.salesperson || '—'}</div>
             <div><strong>Sale date:</strong> {pending.sale_date || '—'}</div>
             {pending.item_summary && (
@@ -600,7 +645,7 @@ function VerifyScreen({ pending, employee, onEmployeeChange, onConfirm, onReject
           border: '1px solid rgba(255,193,7,0.3)', borderRadius: 12,
           fontSize: 13, color: 'var(--text)',
         }}>
-          ⚠️ <strong>Compare</strong> the original photo above with the customer's physical note. Confirm only if they match.
+          ⚠️ <strong>Compare</strong> the original photo above with the customer's physical {isPrinted ? 'receipt' : 'note'}. Confirm only if they match.
         </div>
       </div>
 
