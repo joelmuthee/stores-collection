@@ -465,15 +465,17 @@ function ScanTypePickerScreen({ onPick, onBack }) {
   const subStyle = { fontSize: 12, color: 'var(--text-muted)', marginTop: 2 };
 
   return (
-    <div className="screen home">
-      <div className="topbar" style={{ width: '100%' }}>
-        <h1>What are you scanning?</h1>
+    <div className="screen review-screen">
+      <div className="topbar">
+        <div>
+          <h1>What are you scanning?</h1>
+        </div>
         <button className="btn-icon" onClick={onBack} style={{ color: 'var(--text-muted)' }}>
           <span>←</span>
         </button>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
+      <div className="review-body">
         <button style={cardStyle} onClick={() => onPick('printed')}>
           <span style={iconStyle}>🧾</span>
           <div>
@@ -489,6 +491,10 @@ function ScanTypePickerScreen({ onPick, onBack }) {
             <div style={subStyle}>Collection note from a salesperson</div>
           </div>
         </button>
+      </div>
+
+      <div className="bottom-bar">
+        <button className="btn-secondary" onClick={onBack} style={{ width: '100%' }}>← Back</button>
       </div>
     </div>
   );
