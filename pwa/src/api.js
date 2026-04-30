@@ -1,16 +1,26 @@
 const BASE = 'https://script.google.com/macros/s/AKfycbyWQcmMTMlBjW9zVk8DzKNfej6Pb5KDb8j682LDFEwkZ8Yxvoa4gq1_xz-caWE9aLEhgA/exec';
 
 async function post(body) {
-  const res = await fetch(BASE, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
+  let res, text;
+  try {
+    res = await fetch(BASE, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    return { ok: false, error: 'Network error: ' + (e.message || 'unknown') };
+  }
+  try {
+    text = await res.text();
+  } catch (e) {
+    return { ok: false, error: 'Read error: ' + (e.message || 'unknown') };
+  }
   try {
     return JSON.parse(text);
   } catch {
     console.error('Apps Script raw response:', text.slice(0, 800));
-    return { ok: false, error: 'Server error — check console for details.' };
+    const preview = text.slice(0, 150).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    return { ok: false, error: `[${res.status}] ${preview || 'empty response'}` };
   }
 }
 
