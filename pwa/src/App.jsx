@@ -324,8 +324,7 @@ function HomeScreen({ scanType, setScanType, employee, onEditEmployee, onScan, o
   return (
     <div className="screen home">
       <div className="home-logo">
-        <div className="home-logo-mark">🏪</div>
-        <h2>Oloolua Hardware</h2>
+        <img src="/logo.png" alt="Oloolua Hardware" className="home-logo-img" />
         <p>Stores Collection System</p>
       </div>
 
