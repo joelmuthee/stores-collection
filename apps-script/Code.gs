@@ -257,6 +257,19 @@ function saveScan(payload) {
     }
   }
 
+  // Duplicate check for Pending handwritten notes (same customer in last 24h)
+  if (payload.status === 'Pending' && scan.customer_name && !payload.force) {
+    const dupe = checkDuplicatePendingByCustomer(ss, scan.customer_name, now);
+    if (dupe) {
+      return {
+        ok: false,
+        duplicate: true,
+        error: 'Already authorized for ' + scan.customer_name + ' ' + dupe.minutesAgo + ' min ago',
+        existing_row: { sheet: dupe.sheetName, row: dupe.rowNum },
+      };
+    }
+  }
+
   // Compute pickup number for partial pickups
   let statusValue = payload.status || 'Collected';
   if (payload.status === 'Partial' && scan.trnx_ref) {
@@ -739,6 +752,34 @@ function fuzzyMatchStaff(raw, ss) {
     if (score > bestScore) { bestScore = score; bestName = name; }
   }
   return bestScore >= 0.65 ? bestName : null;
+}
+
+// Find a Pending row for this customer within the last 24h.
+// Returns { sheetName, rowNum, minutesAgo } or null.
+function checkDuplicatePendingByCustomer(ss, customerName, now) {
+  const target = String(customerName).toLowerCase().trim();
+  if (!target) return null;
+  const cutoffMs = now.getTime() - 24 * 60 * 60 * 1000;
+  const sheets = ss.getSheets();
+  const pattern = /^[A-Za-z]+ \d{4}$/;
+  for (const sheet of sheets) {
+    if (!pattern.test(sheet.getName())) continue;
+    if (sheet.getLastRow() <= 1) continue;
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, DAILY_HEADERS.length).getValues();
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      if (row[14] !== 'Pending') continue;
+      if (String(row[4]).toLowerCase().trim() !== target) continue;
+      const ts = new Date(row[0]).getTime();
+      if (isNaN(ts) || ts < cutoffMs) continue;
+      return {
+        sheetName: sheet.getName(),
+        rowNum: i + 2,
+        minutesAgo: Math.round((now.getTime() - ts) / 60000),
+      };
+    }
+  }
+  return null;
 }
 
 function countTrnxRefOccurrences(ss, trnxRef) {
