@@ -54,7 +54,10 @@
       "Bash(clasp status *)",
       "Bash(clasp push *)",
       "Bash(clasp pull *)",
-      "Bash(clasp deploy *)"
+      "Bash(clasp deploy *)",
+      "Bash(curl -sL \"https://script.google.com/macros/s/AKfycbyWQcmMTMlBjW9zVk8DzKNfej6Pb5KDb8j682LDFEwkZ8Yxvoa4gq1_xz-caWE9aLEhgA/exec?action=addStaff&name=Joel&role=Salesperson\")",
+      "Bash(curl -sL \"https://script.google.com/macros/s/AKfycbyWQcmMTMlBjW9zVk8DzKNfej6Pb5KDb8j682LDFEwkZ8Yxvoa4gq1_xz-caWE9aLEhgA/exec?action=addStaff&name=Muteti&role=Salesperson\")",
+      "Bash(curl -sL \"https://script.google.com/macros/s/AKfycbyWQcmMTMlBjW9zVk8DzKNfej6Pb5KDb8j682LDFEwkZ8Yxvoa4gq1_xz-caWE9aLEhgA/exec?action=getStaff\")"
     ]
   }
 }

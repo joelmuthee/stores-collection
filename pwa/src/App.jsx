@@ -337,6 +337,7 @@ export default function App() {
       )}
       {screen === 'camera' && (
         <CameraScreen
+          scanType={scanType}
           videoRef={videoRef}
           fileRef={fileRef}
           onCapture={handleCapture}
@@ -618,13 +619,23 @@ function VerifyScreen({ pending, employee, onEmployeeChange, onConfirm, onReject
 // ─────────────────────────────────────────────
 // CameraScreen
 // ─────────────────────────────────────────────
-function CameraScreen({ videoRef, fileRef, onCapture, onGallery, onFileChange, onBack }) {
+function CameraScreen({ scanType, videoRef, fileRef, onCapture, onGallery, onFileChange, onBack }) {
+  const isHandwritten = scanType === 'handwritten';
   return (
     <div className="screen camera-screen">
       <div className="camera-viewport">
         <video ref={videoRef} autoPlay playsInline muted />
         <div className="camera-overlay">
-          <div className="camera-guide" />
+          <div className={`camera-guide${isHandwritten ? ' camera-guide-wide' : ''}`} />
+          {isHandwritten && (
+            <div style={{
+              position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)',
+              background: 'rgba(0,0,0,0.65)', color: '#fff', padding: '6px 12px',
+              borderRadius: 999, fontSize: 12, whiteSpace: 'nowrap',
+            }}>
+              Rotate phone landscape for wide notes
+            </div>
+          )}
         </div>
       </div>
       <div className="camera-controls">

@@ -159,6 +159,10 @@ Rules:
 - Each line is usually one item: [qty][unit] [description]
 - Items often wrap to a second line — combine wrapped lines into one item.
 - If a fraction is written as "11/4", interpret as 1¼.
+- Notes may be in MULTIPLE COLUMNS. Read the LEFT column top-to-bottom completely, then the RIGHT column top-to-bottom. Do not interleave.
+- Items at the very top edge of the page (e.g. handwritten in margins or above the printed border) MUST be captured.
+- A red tick or strikethrough mark drawn over the items is a customer signature/marking — IGNORE it, do not let it cause you to skip items.
+- Before returning, COUNT every item line you've extracted and verify it matches the number of bullet points or dashes on the original note. If your count is lower, re-scan for missed items, especially in cramped or wrapped lines.
 - Return ONLY the JSON object, no preamble or explanation.`;
 
 function runOcr(payload) {
@@ -170,7 +174,7 @@ function runOcr(payload) {
 
   const body = {
     model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
+    max_tokens: 4096,
     messages: [{
       role: 'user',
       content: [
