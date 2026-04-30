@@ -542,15 +542,14 @@ function PendingListScreen({ pending, onSelect, onBack, onRefresh }) {
                 <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
                   {p.receipt_type === 'printed' ? '🧾' : '✍️'} by {p.salesperson || '—'} {p.sale_date && `· ${p.sale_date}`}
                 </div>
-                {p.item_summary && (
-                  <div style={{
-                    fontSize: 12, color: 'var(--text-muted)', marginTop: 6,
-                    overflow: 'hidden', textOverflow: 'ellipsis',
-                    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                  }}>
-                    {p.item_summary}
-                  </div>
-                )}
+                {p.item_summary && (() => {
+                  const count = p.item_summary.split(/, (?=\d)/).filter(Boolean).length;
+                  return (
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+                      {count} item{count === 1 ? '' : 's'}
+                    </div>
+                  );
+                })()}
               </div>
               <span style={{ fontSize: 20, color: 'var(--gold)' }}>›</span>
             </div>
@@ -620,9 +619,24 @@ function VerifyScreen({ pending, employee, onEmployeeChange, onConfirm, onReject
             {pending.customer_name && <div><strong>Customer:</strong> {pending.customer_name}</div>}
             <div><strong>Salesperson:</strong> {pending.salesperson || '—'}</div>
             <div><strong>Sale date:</strong> {pending.sale_date || '—'}</div>
-            {pending.item_summary && (
-              <div style={{ marginTop: 6 }}><strong>Items:</strong> {pending.item_summary}</div>
-            )}
+            {pending.item_summary && (() => {
+              const items = pending.item_summary.split(/, (?=\d)/).filter(Boolean);
+              return (
+                <div style={{ marginTop: 8 }}>
+                  <strong>Items ({items.length}):</strong>
+                  <ul style={{
+                    margin: '6px 0 0', paddingLeft: 20,
+                    maxHeight: 280, overflowY: 'auto',
+                    background: 'var(--surface2)', borderRadius: 8,
+                    padding: '8px 8px 8px 28px',
+                  }}>
+                    {items.map((item, i) => (
+                      <li key={i} style={{ padding: '3px 0', fontSize: 13 }}>{item.trim()}</li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })()}
             {pending.notes && (
               <div style={{ marginTop: 6 }}><strong>Notes:</strong> {pending.notes}</div>
             )}
