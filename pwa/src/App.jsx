@@ -430,7 +430,7 @@ function HomeScreen({ onScanPrinted, onAuthorize, onVerify, onManual }) {
         <button style={cardStyle} onClick={onVerify}>
           <span style={iconStyle}>📋</span>
           <div>
-            <div style={titleStyle}>Verify Collection</div>
+            <div style={titleStyle}>Verify Collection (Stores)</div>
             <div style={subStyle}>Customer brought a handwritten note</div>
           </div>
         </button>
