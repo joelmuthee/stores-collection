@@ -329,17 +329,38 @@ export default function App() {
     }
   };
 
+  const [pendingRefreshing, setPendingRefreshing] = useState(false);
+
   const openPendingList = async () => {
-    setProcessingText('Loading pending collections…');
-    setScreen('processing');
+    // Show cached list instantly if we have one
+    const cachedRaw = localStorage.getItem('pendingListCache');
+    let cached = null;
+    if (cachedRaw) {
+      try { cached = JSON.parse(cachedRaw); } catch {}
+    }
+    if (cached?.pending) {
+      setPendingList(cached.pending);
+      setScreen('pending');
+      setPendingRefreshing(true);
+    } else {
+      setProcessingText('Loading pending collections…');
+      setScreen('processing');
+    }
+
     const res = await getPendingCollections();
+    setPendingRefreshing(false);
     if (!res?.ok) {
-      showToast(res?.error || 'Failed to load pending list.');
-      setScreen('home');
+      if (!cached?.pending) {
+        showToast(res?.error || 'Failed to load pending list.');
+        setScreen('home');
+      } else {
+        showToast('Could not refresh — showing last cached list.');
+      }
       return;
     }
     setPendingList(res.pending || []);
-    setScreen('pending');
+    localStorage.setItem('pendingListCache', JSON.stringify({ pending: res.pending || [], at: Date.now() }));
+    if (!cached?.pending) setScreen('pending');
   };
 
   const handleMarkCollected = async () => {
@@ -440,6 +461,7 @@ export default function App() {
       {screen === 'pending' && (
         <PendingListScreen
           pending={pendingList}
+          refreshing={pendingRefreshing}
           onSelect={(p) => { setSelectedPending(p); setScreen('verify'); }}
           onBack={() => setScreen('home')}
           onRefresh={openPendingList}
@@ -649,16 +671,28 @@ function ScanTypePickerScreen({ onPick, onBack }) {
 // ─────────────────────────────────────────────
 // PendingListScreen — store person sees today's pending
 // ─────────────────────────────────────────────
-function PendingListScreen({ pending, onSelect, onBack, onRefresh }) {
+function PendingListScreen({ pending, refreshing, onSelect, onBack, onRefresh }) {
   return (
     <div className="screen review-screen">
       <div className="topbar">
-        <button className="btn-icon" onClick={onBack} style={{ color: 'var(--text-muted)' }}>
-          <span>←</span>
+        <button
+          onClick={onBack}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: 'var(--surface2)', color: 'var(--gold)',
+            border: '1px solid var(--border)', borderRadius: 10,
+            padding: '8px 14px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+          }}
+        >
+          <span style={{ fontSize: 18, lineHeight: 1 }}>←</span>
+          <span>Back</span>
         </button>
-        <div style={{ flex: 1, marginLeft: 8 }}>
-          <h1>📋 Pending Collections</h1>
-          <div className="topbar-sub">{pending.length} awaiting collection</div>
+        <div style={{ flex: 1, marginLeft: 12 }}>
+          <h1>📋 Pending</h1>
+          <div className="topbar-sub">
+            {pending.length} awaiting collection
+            {refreshing && <span style={{ marginLeft: 6, color: 'var(--gold)' }}>· refreshing…</span>}
+          </div>
         </div>
       </div>
 
