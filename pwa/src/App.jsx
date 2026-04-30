@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { runOcr, saveScan, getStaff } from './api.js';
+import { runOcr, saveScan, getStaff, uploadImage } from './api.js';
 
 function todayDDMMYYYY() {
   const d = new Date();
@@ -164,13 +164,25 @@ export default function App() {
   };
 
   const handleSubmit = async (force = false) => {
-    setProcessingText('Saving…');
+    setProcessingText('Uploading image…');
     setScreen('processing');
+    let drive_image_link;
+    if (capturedImage?.base64) {
+      const up = await uploadImage(
+        capturedImage.base64,
+        capturedImage.mediaType,
+        editedScan?.trnx_ref,
+        editedScan?.date,
+      );
+      if (up?.ok) drive_image_link = up.drive_link;
+    }
+    setProcessingText('Saving…');
     try {
       const payload = {
         scan: editedScan,
         stores_employee: employee || undefined,
         notes: notes || undefined,
+        drive_image_link,
         ...(force && { force: true }),
       };
       const res = await saveScan(payload);

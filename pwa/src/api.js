@@ -27,6 +27,9 @@ async function post(body) {
 export const runOcr = (image, mediaType, type) =>
   post({ action: 'ocr', image, mediaType, type });
 
+export const uploadImage = (image_base64, mime_type, trnx_ref, date) =>
+  post({ action: 'uploadImage', image_base64, mime_type, trnx_ref, date });
+
 export const saveScan = (payload) =>
   post({ action: 'saveScan', ...payload });
 

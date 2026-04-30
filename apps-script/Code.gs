@@ -23,10 +23,10 @@ function getSheet() {
 // ============================================================
 
 const DAILY_HEADERS = [
-  'Timestamp', 'Receipt Type', 'Document Label', 'Trnx Ref',
+  'Timestamp', 'Receipt Type', 'Trnx Ref',
   'Manual Marking', 'Customer Name', 'Salesperson', 'Stores Employee',
   'Sale Date', 'Sale Time', 'Collection Time', 'Time Gap (mins)',
-  'Item Count', 'Items (JSON)', 'Item Summary', 'Total Amount',
+  'Item Count', 'Item Summary', 'Total Amount',
   'Status', 'Drive Image Link', 'Notes', 'Flag',
 ];
 
@@ -263,24 +263,22 @@ function saveScan(payload) {
   const row = [
     now.toISOString(),                          // A: Timestamp
     scan.receipt_type || '',                    // B: Receipt Type
-    scan.document_label || 'Note',              // C: Document Label
-    scan.trnx_ref || '',                        // D: Trnx Ref
-    scan.manual_marking || '',                  // E: Manual Marking
-    scan.customer_name || '',                   // F: Customer Name
-    scan.salesperson || '',                     // G: Salesperson
-    payload.stores_employee || '',              // H: Stores Employee
-    saleDate || '',                             // I: Sale Date
-    saleTime || '',                             // J: Sale Time
-    now.toISOString(),                          // K: Collection Time
-    timeGap !== null ? timeGap : '',            // L: Time Gap (mins)
-    items.length,                               // M: Item Count
-    JSON.stringify(items),                      // N: Items (JSON)
-    itemSummary,                                // O: Item Summary
-    scan.total !== undefined ? scan.total : '', // P: Total Amount
-    payload.status || 'Collected',              // Q: Status
-    payload.drive_image_link || '',             // R: Drive Image Link
-    payload.notes || '',                        // S: Notes
-    flags.join('; '),                           // T: Flag
+    scan.trnx_ref || '',                        // C: Trnx Ref
+    scan.manual_marking || '',                  // D: Manual Marking
+    scan.customer_name || '',                   // E: Customer Name
+    scan.salesperson || '',                     // F: Salesperson
+    payload.stores_employee || '',              // G: Stores Employee
+    saleDate || '',                             // H: Sale Date
+    saleTime || '',                             // I: Sale Time
+    now.toISOString(),                          // J: Collection Time
+    timeGap !== null ? timeGap : '',            // K: Time Gap (mins)
+    items.length,                               // L: Item Count
+    itemSummary,                                // M: Item Summary
+    scan.total !== undefined ? scan.total : '', // N: Total Amount
+    payload.status || 'Collected',              // O: Status
+    payload.drive_image_link || '',             // P: Drive Image Link
+    payload.notes || '',                        // Q: Notes
+    flags.join('; '),                           // R: Flag
   ];
 
   dailyTab.appendRow(row);
@@ -445,24 +443,15 @@ function getDailySummary(payload) {
   const itemsByCategory = {};
 
   data.forEach(row => {
-    const status = row[16];
-    const total = parseFloat(row[15]) || 0;
-    const salesperson = row[6];
-    const itemsJson = row[13];
+    const status = row[14];
+    const total = parseFloat(row[13]) || 0;
+    const salesperson = row[5];
 
     totalValue += total;
     if (status === 'Collected') collected++;
     else pending++;
 
     if (salesperson) salespersons[salesperson] = (salespersons[salesperson] || 0) + 1;
-
-    try {
-      const items = JSON.parse(itemsJson || '[]');
-      items.forEach(item => {
-        const cat = categoriseItem(item.description || '');
-        itemsByCategory[cat] = (itemsByCategory[cat] || 0) + 1;
-      });
-    } catch (_) {}
   });
 
   return {
@@ -508,10 +497,10 @@ function getMonthSummary(payload) {
 
   data.forEach(row => {
     if (!row[0]) return;
-    const status = row[16];
-    const total = parseFloat(row[15]) || 0;
-    const sp = row[6];
-    const cust = row[5];
+    const status = row[14];
+    const total = parseFloat(row[13]) || 0;
+    const sp = row[5];
+    const cust = row[4];
 
     totalScans++;
     totalValue += total;
