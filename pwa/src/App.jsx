@@ -1,5 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { runOcr, saveScan, getStaff, uploadImage } from './api.js';
+import { runOcr, saveScan, getStaff, uploadImage, getPendingCollections, markCollected } from './api.js';
+
+function driveThumbnailUrl(driveUrl, size = 1000) {
+  const m = driveUrl?.match(/\/d\/([^/]+)/);
+  if (!m) return driveUrl;
+  return `https://drive.google.com/thumbnail?id=${m[1]}&sz=w${size}`;
+}
 
 function todayDDMMYYYY() {
   const d = new Date();
@@ -43,6 +49,9 @@ export default function App() {
   const [notes, setNotes] = useState('');
   const [staffList, setStaffList] = useState([]);
   const [partialPickup, setPartialPickup] = useState(false);
+  const [flowMode, setFlowMode] = useState('collect'); // 'collect' | 'authorize'
+  const [pendingList, setPendingList] = useState([]);
+  const [selectedPending, setSelectedPending] = useState(null);
   const toastTimer = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -165,6 +174,7 @@ export default function App() {
   };
 
   const handleSubmit = async (force = false) => {
+    const isAuthorize = flowMode === 'authorize';
     setProcessingText('Uploading image…');
     setScreen('processing');
     let drive_image_link;
@@ -181,11 +191,11 @@ export default function App() {
     try {
       const payload = {
         scan: editedScan,
-        stores_employee: employee || undefined,
+        stores_employee: isAuthorize ? undefined : (employee || undefined),
         notes: notes || undefined,
         drive_image_link,
         ...((force || partialPickup) && { force: true }),
-        ...(partialPickup && { status: 'Partial' }),
+        ...(isAuthorize ? { status: 'Pending' } : (partialPickup && { status: 'Partial' })),
       };
       const res = await saveScan(payload);
       if (!res.ok && res.duplicate && !force) {
@@ -198,12 +208,55 @@ export default function App() {
         showToast(res.error || 'Save failed. Try again.');
         return;
       }
-      setSuccessData({ trnx_ref: editedScan?.trnx_ref, flags: res.flags, sheetUrl: res.sheetUrl, sheetName: res.sheetName });
+      setSuccessData({
+        trnx_ref: editedScan?.trnx_ref,
+        flags: res.flags,
+        sheetUrl: res.sheetUrl,
+        sheetName: res.sheetName,
+        mode: isAuthorize ? 'authorized' : 'collected',
+      });
       setScreen('success');
     } catch {
       setScreen('review');
       showToast('Network error. Check your connection.');
     }
+  };
+
+  const openPendingList = async () => {
+    setProcessingText('Loading pending collections…');
+    setScreen('processing');
+    const res = await getPendingCollections();
+    if (!res?.ok) {
+      showToast(res?.error || 'Failed to load pending list.');
+      setScreen('home');
+      return;
+    }
+    setPendingList(res.pending || []);
+    setScreen('pending');
+  };
+
+  const handleMarkCollected = async () => {
+    if (!selectedPending) return;
+    if (!employee) {
+      showToast('Please select your name first.');
+      return;
+    }
+    setProcessingText('Marking as collected…');
+    setScreen('processing');
+    const res = await markCollected(selectedPending.sheetName, selectedPending.rowNum, employee);
+    if (!res?.ok) {
+      showToast(res?.error || 'Failed to mark collected.');
+      setScreen('verify');
+      return;
+    }
+    setSuccessData({
+      flags: [],
+      sheetUrl: res.sheetUrl,
+      sheetName: res.sheetName,
+      mode: 'collected',
+      customer_name: selectedPending.customer_name,
+    });
+    setScreen('success');
   };
 
   const handleManualSubmit = async (manualScan, notes) => {
@@ -237,6 +290,8 @@ export default function App() {
     setSuccessData(null);
     setNotes('');
     setPartialPickup(false);
+    setSelectedPending(null);
+    setFlowMode('collect');
     setScreen('home');
   };
 
@@ -244,12 +299,31 @@ export default function App() {
     <>
       {screen === 'home' && (
         <HomeScreen
-          scanType={scanType}
-          setScanType={setScanType}
+          onScanPrinted={() => { setScanType('printed'); setFlowMode('collect'); setScreen('camera'); }}
+          onAuthorize={() => { setScanType('handwritten'); setFlowMode('authorize'); setScreen('camera'); }}
+          onVerify={() => { setFlowMode('collect'); openPendingList(); }}
+          onManual={() => { setScanType('handwritten'); setFlowMode('collect'); setScreen('manual'); }}
+        />
+      )}
+      {screen === 'pending' && (
+        <PendingListScreen
+          pending={pendingList}
+          onSelect={(p) => { setSelectedPending(p); setScreen('verify'); }}
+          onBack={() => setScreen('home')}
+          onRefresh={openPendingList}
+        />
+      )}
+      {screen === 'verify' && selectedPending && (
+        <VerifyScreen
+          pending={selectedPending}
           employee={employee}
-          onEditEmployee={() => setShowNameModal(true)}
-          onScan={() => setScreen('camera')}
-          onManual={() => setScreen('manual')}
+          onEmployeeChange={(name) => {
+            setEmployee(name);
+            name ? localStorage.setItem('employee', name) : localStorage.removeItem('employee');
+          }}
+          onConfirm={handleMarkCollected}
+          onReject={() => { setSelectedPending(null); setScreen('pending'); }}
+          onBack={() => { setSelectedPending(null); setScreen('pending'); }}
         />
       )}
       {screen === 'manual' && (
@@ -276,6 +350,7 @@ export default function App() {
       )}
       {screen === 'review' && editedScan && (
         <ReviewScreen
+          flowMode={flowMode}
           scan={scan}
           editedScan={editedScan}
           image={capturedImage?.dataUrl}
@@ -324,7 +399,18 @@ export default function App() {
 // ─────────────────────────────────────────────
 // HomeScreen
 // ─────────────────────────────────────────────
-function HomeScreen({ scanType, setScanType, employee, onEditEmployee, onScan, onManual }) {
+function HomeScreen({ onScanPrinted, onAuthorize, onVerify, onManual }) {
+  const cardStyle = {
+    display: 'flex', alignItems: 'center', gap: 14,
+    padding: '18px 18px', background: 'var(--surface)',
+    border: '1px solid var(--border)', borderRadius: 16,
+    width: '100%', textAlign: 'left', cursor: 'pointer',
+    color: 'var(--text)', fontSize: 15,
+  };
+  const iconStyle = { fontSize: 28, lineHeight: 1 };
+  const titleStyle = { fontWeight: 600, fontSize: 16 };
+  const subStyle = { fontSize: 12, color: 'var(--text-muted)', marginTop: 2 };
+
   return (
     <div className="screen home">
       <div className="home-logo">
@@ -332,31 +418,199 @@ function HomeScreen({ scanType, setScanType, employee, onEditEmployee, onScan, o
         <p>Stores Collection System</p>
       </div>
 
-      <div className="scan-type-row">
-        <button
-          className={`scan-type-btn${scanType === 'printed' ? ' active' : ''}`}
-          onClick={() => setScanType('printed')}
-        >
-          <span className="scan-type-icon">🧾</span>
-          Printed Receipt
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
+        <button style={cardStyle} onClick={onScanPrinted}>
+          <span style={iconStyle}>🧾</span>
+          <div>
+            <div style={titleStyle}>Scan Printed Receipt</div>
+            <div style={subStyle}>Customer collecting with Urovo receipt</div>
+          </div>
         </button>
-        <button
-          className={`scan-type-btn${scanType === 'handwritten' ? ' active' : ''}`}
-          onClick={() => setScanType('handwritten')}
-        >
-          <span className="scan-type-icon">✍️</span>
-          Handwritten Note
+
+        <button style={cardStyle} onClick={onVerify}>
+          <span style={iconStyle}>📋</span>
+          <div>
+            <div style={titleStyle}>Verify Collection</div>
+            <div style={subStyle}>Customer brought a handwritten note</div>
+          </div>
+        </button>
+
+        <button style={cardStyle} onClick={onAuthorize}>
+          <span style={iconStyle}>✍️</span>
+          <div>
+            <div style={titleStyle}>Authorize Note (Salesperson)</div>
+            <div style={subStyle}>Log a note you just issued</div>
+          </div>
         </button>
       </div>
 
-      <button className="btn-scan" onClick={onScan}>
-        <span>📷</span> Scan
-      </button>
-
-      <button className="btn-secondary" onClick={onManual} style={{ width: '100%', padding: '14px', borderRadius: '14px', fontSize: '15px' }}>
+      <button className="btn-secondary" onClick={onManual} style={{ width: '100%', padding: '12px', borderRadius: 12, fontSize: 13, marginTop: 8 }}>
         ✏️ Enter Manually
       </button>
+    </div>
+  );
+}
 
+// ─────────────────────────────────────────────
+// PendingListScreen — store person sees today's pending
+// ─────────────────────────────────────────────
+function PendingListScreen({ pending, onSelect, onBack, onRefresh }) {
+  return (
+    <div className="screen review-screen">
+      <div className="topbar">
+        <div>
+          <h1>📋 Pending Collections</h1>
+          <div className="topbar-sub">{pending.length} awaiting collection</div>
+        </div>
+        <button className="btn-icon" onClick={onBack} style={{ color: 'var(--text-muted)' }}>
+          <span>✕</span>
+        </button>
+      </div>
+
+      <div className="review-body">
+        {pending.length === 0 && (
+          <div className="card" style={{ textAlign: 'center', padding: 32 }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>✨</div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>No pending collections</div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              All authorized notes have been collected.
+            </div>
+          </div>
+        )}
+
+        {pending.map(p => (
+          <button
+            key={`${p.sheetName}-${p.rowNum}`}
+            className="card"
+            onClick={() => onSelect(p)}
+            style={{ width: '100%', textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border)' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 16, color: 'var(--text)' }}>
+                  {p.customer_name || '(no customer name)'}
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
+                  by {p.salesperson || '—'} {p.sale_date && `· ${p.sale_date}`}
+                </div>
+                {p.item_summary && (
+                  <div style={{
+                    fontSize: 12, color: 'var(--text-muted)', marginTop: 6,
+                    overflow: 'hidden', textOverflow: 'ellipsis',
+                    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                  }}>
+                    {p.item_summary}
+                  </div>
+                )}
+              </div>
+              <span style={{ fontSize: 20, color: 'var(--gold)' }}>›</span>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="bottom-bar">
+        <button className="btn-secondary" onClick={onRefresh}>↻ Refresh</button>
+        <button className="btn-secondary" onClick={onBack}>Home</button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// VerifyScreen — compare salesperson's photo with customer's note
+// ─────────────────────────────────────────────
+function VerifyScreen({ pending, employee, onEmployeeChange, onConfirm, onReject, onBack }) {
+  return (
+    <div className="screen review-screen">
+      <div className="topbar">
+        <div>
+          <h1>🔍 Verify Note</h1>
+          <div className="topbar-sub">{pending.customer_name || '(no name)'}</div>
+        </div>
+        <button className="btn-icon" onClick={onBack} style={{ color: 'var(--text-muted)' }}>
+          <span>←</span>
+        </button>
+      </div>
+
+      <div className="review-body">
+        <div className="card" style={{ background: 'var(--surface2)', borderColor: 'var(--gold)' }}>
+          <div style={{ fontSize: 12, color: 'var(--gold)', fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Original from salesperson
+          </div>
+          {pending.drive_image_link ? (
+            <a href={pending.drive_image_link} target="_blank" rel="noreferrer">
+              <img
+                src={driveThumbnailUrl(pending.drive_image_link, 1600)}
+                alt="Original note"
+                style={{ width: '100%', borderRadius: 8, display: 'block' }}
+              />
+            </a>
+          ) : (
+            <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+              No image stored.
+            </div>
+          )}
+          {pending.drive_image_link && (
+            <a
+              href={pending.drive_image_link}
+              target="_blank" rel="noreferrer"
+              style={{ display: 'block', textAlign: 'center', marginTop: 8, fontSize: 13, color: 'var(--gold)' }}
+            >
+              Open full size ↗
+            </a>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-title">Details</div>
+          <div style={{ fontSize: 14, lineHeight: 1.7 }}>
+            <div><strong>Customer:</strong> {pending.customer_name || '—'}</div>
+            <div><strong>Salesperson:</strong> {pending.salesperson || '—'}</div>
+            <div><strong>Sale date:</strong> {pending.sale_date || '—'}</div>
+            {pending.item_summary && (
+              <div style={{ marginTop: 6 }}><strong>Items:</strong> {pending.item_summary}</div>
+            )}
+            {pending.notes && (
+              <div style={{ marginTop: 6 }}><strong>Notes:</strong> {pending.notes}</div>
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-title">Stores Employee</div>
+          <div className="field-row">
+            <select
+              className="field-input"
+              value={employee}
+              onChange={e => onEmployeeChange(e.target.value)}
+              style={{ width: '100%' }}
+            >
+              <option value="">— Select your name —</option>
+              {STORES_EMPLOYEES.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div style={{
+          padding: '12px 14px', background: 'rgba(255,193,7,0.08)',
+          border: '1px solid rgba(255,193,7,0.3)', borderRadius: 12,
+          fontSize: 13, color: 'var(--text)',
+        }}>
+          ⚠️ <strong>Compare</strong> the original photo above with the customer's physical note. Confirm only if they match.
+        </div>
+      </div>
+
+      <div className="bottom-bar">
+        <button className="btn-secondary" onClick={onReject} style={{ color: 'var(--danger)' }}>
+          ✕ No Match
+        </button>
+        <button className="btn-primary" onClick={onConfirm}>
+          ✓ Match — Collected
+        </button>
+      </div>
     </div>
   );
 }
@@ -414,6 +668,7 @@ function ProcessingScreen({ image, text }) {
 const STORES_EMPLOYEES = ["King'ori", 'Maurine', 'Njoroge', 'Joel', 'Irene', 'Muteti'];
 
 function ReviewScreen({
+  flowMode = 'collect',
   scan, editedScan, image, employee, onEmployeeChange, staffList,
   dupeBanner, notes, onNotesChange,
   partialPickup, onPartialPickupChange,
@@ -422,6 +677,7 @@ function ReviewScreen({
 }) {
   const conf = scan?.confidence || {};
   const isPrinted = editedScan.receipt_type === 'printed';
+  const isAuthorize = flowMode === 'authorize';
 
   return (
     <div className="screen review-screen">
@@ -484,44 +740,60 @@ function ReviewScreen({
           </div>
         </div>
 
-        <label
-          style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '12px 14px', background: 'var(--surface)',
-            borderRadius: 12, border: '1px solid var(--border)',
-            cursor: 'pointer', fontSize: 14, color: 'var(--text)',
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={partialPickup}
-            onChange={e => onPartialPickupChange(e.target.checked)}
-            style={{ width: 18, height: 18, accentColor: 'var(--gold)' }}
-          />
-          <span>Partial pickup <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>(customer collecting balance later)</span></span>
-        </label>
+        {!isAuthorize && (
+          <label
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '12px 14px', background: 'var(--surface)',
+              borderRadius: 12, border: '1px solid var(--border)',
+              cursor: 'pointer', fontSize: 14, color: 'var(--text)',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={partialPickup}
+              onChange={e => onPartialPickupChange(e.target.checked)}
+              style={{ width: 18, height: 18, accentColor: 'var(--gold)' }}
+            />
+            <span>Partial pickup <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>(customer collecting balance later)</span></span>
+          </label>
+        )}
 
-        <div className="card">
-          <div className="card-title">Stores Employee</div>
-          <div className="field-row">
-            <select
-              className="field-input"
-              value={employee}
-              onChange={e => onEmployeeChange(e.target.value)}
-              style={{ width: '100%' }}
-            >
-              <option value="">— Select your name —</option>
-              {STORES_EMPLOYEES.map(name => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
+        {!isAuthorize && (
+          <div className="card">
+            <div className="card-title">Stores Employee</div>
+            <div className="field-row">
+              <select
+                className="field-input"
+                value={employee}
+                onChange={e => onEmployeeChange(e.target.value)}
+                style={{ width: '100%' }}
+              >
+                <option value="">— Select your name —</option>
+                {STORES_EMPLOYEES.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
           </div>
-        </div>
+        )}
+
+        {isAuthorize && (
+          <div style={{
+            padding: '12px 14px', background: 'rgba(212,175,55,0.08)',
+            border: '1px solid rgba(212,175,55,0.3)', borderRadius: 12,
+            fontSize: 13, color: 'var(--text)',
+          }}>
+            🔒 This will be saved as <strong>Pending</strong>. The store will verify the customer's note against your photo before issuing goods.
+          </div>
+        )}
       </div>
 
       <div className="bottom-bar">
         <button className="btn-secondary" onClick={onBack}>Retake</button>
-        <button className="btn-primary" onClick={onSubmit}>Submit</button>
+        <button className="btn-primary" onClick={onSubmit}>
+          {isAuthorize ? 'Authorize' : 'Submit'}
+        </button>
       </div>
     </div>
   );
@@ -673,10 +945,21 @@ function HandwrittenItemsTable({ items }) {
 // ─────────────────────────────────────────────
 function SuccessScreen({ data, onScanAnother }) {
   const sheetUrl = data?.sheetUrl || 'https://docs.google.com/spreadsheets/d/1b0YP4BfiPYAtN-zH6VkLWE0Uo-eI-MGQFSNad1JYFhg/edit';
+  const isAuthorized = data?.mode === 'authorized';
   return (
     <div className="screen success-screen">
-      <div className="success-icon">✅</div>
-      <h2 className="success-title">Saved!</h2>
+      <div className="success-icon">{isAuthorized ? '🔒' : '✅'}</div>
+      <h2 className="success-title">{isAuthorized ? 'Authorized!' : 'Saved!'}</h2>
+      {isAuthorized && (
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', maxWidth: 280 }}>
+          The store will verify the customer's note against your photo before issuing goods.
+        </p>
+      )}
+      {data?.customer_name && (
+        <p className="success-ref">
+          Customer: <strong>{data.customer_name}</strong>
+        </p>
+      )}
       {data?.trnx_ref && (
         <p className="success-ref">
           Trnx Ref: <strong>{data.trnx_ref}</strong>

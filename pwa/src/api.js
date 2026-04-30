@@ -41,3 +41,9 @@ export const getProductSuggestions = (query) =>
 
 export const addAlias = (alias, canonical) =>
   post({ action: 'addAlias', alias, canonical });
+
+export const getPendingCollections = () =>
+  fetch(`${BASE}?action=getPendingCollections`).then(r => r.json()).catch(e => ({ ok: false, error: e.message }));
+
+export const markCollected = (sheetName, rowNum, stores_employee) =>
+  post({ action: 'markCollected', sheetName, rowNum, stores_employee });

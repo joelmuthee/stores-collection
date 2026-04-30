@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pwa-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "pwa", "run", "preview", "--", "--host"],
+      "port": 4173,
+      "autoPort": true
+    }
+  ]
+}

@@ -61,6 +61,8 @@ function doPost(e) {
       case 'getMonthSummary':    result = getMonthSummary(payload);        break;
       case 'findByTrnxRef':      result = findByTrnxRef(payload);          break;
       case 'getStaff':           result = getStaff();                      break;
+      case 'getPendingCollections': result = getPendingCollections();      break;
+      case 'markCollected':      result = markCollected(payload);          break;
       default:
         result = { ok: false, error: 'Unknown action: ' + action };
     }
@@ -77,6 +79,7 @@ function doGet(e) {
   if (action === 'getDailySummary')  return jsonResponse(getDailySummary(e.parameter));
   if (action === 'getMonthSummary')  return jsonResponse(getMonthSummary(e.parameter));
   if (action === 'getStaff')         return jsonResponse(getStaff());
+  if (action === 'getPendingCollections') return jsonResponse(getPendingCollections());
   return jsonResponse({ ok: true, message: 'Oloolua Collection System is running.' });
 }
 
@@ -201,6 +204,23 @@ function runOcr(payload) {
     }
   }
 
+  const ss = getSheet();
+
+  // For handwritten notes, snap salesperson to the closest known staff name
+  if (payload.type === 'handwritten' && scan.salesperson) {
+    const matched = fuzzyMatchStaff(scan.salesperson, ss);
+    if (matched) scan.salesperson = matched;
+  }
+
+  // If customer_name is actually a staff member, move it to salesperson
+  if (scan.customer_name) {
+    const staffMatch = fuzzyMatchStaff(scan.customer_name, ss);
+    if (staffMatch) {
+      if (!scan.salesperson) scan.salesperson = staffMatch;
+      scan.customer_name = null;
+    }
+  }
+
   return { ok: true, scan };
 }
 
@@ -239,6 +259,7 @@ function saveScan(payload) {
     const pickupNum = countTrnxRefOccurrences(ss, scan.trnx_ref) + 1;
     statusValue = 'Partial #' + pickupNum;
   }
+  const isPending = statusValue === 'Pending';
 
   const dailyTab = getOrCreateMonthTab(ss, now);
   const saleDate = scan.date || null;
@@ -274,11 +295,11 @@ function saveScan(payload) {
     scan.manual_marking || '',                  // D: Manual Marking
     scan.customer_name || '',                   // E: Customer Name
     scan.salesperson || '',                     // F: Salesperson
-    payload.stores_employee || '',              // G: Stores Employee
+    isPending ? '' : (payload.stores_employee || ''),  // G: Stores Employee
     saleDate || '',                             // H: Sale Date
     saleTime || '',                             // I: Sale Time
-    now.toISOString(),                          // J: Collection Time
-    timeGap !== null ? timeGap : '',            // K: Time Gap (mins)
+    isPending ? '' : now.toISOString(),         // J: Collection Time
+    isPending ? '' : (timeGap !== null ? timeGap : ''), // K: Time Gap (mins)
     items.length,                               // L: Item Count
     itemSummary,                                // M: Item Summary
     scan.total !== undefined ? scan.total : '', // N: Total Amount
@@ -538,6 +559,84 @@ function getMonthSummary(payload) {
 }
 
 // ============================================================
+// getPendingCollections — list all rows with Status === 'Pending'
+// ============================================================
+// Returns: { ok: true, pending: [{ sheetName, rowNum, timestamp, customer_name,
+//            salesperson, item_summary, drive_image_link, sale_date, notes }] }
+
+function getPendingCollections() {
+  const ss = getSheet();
+  const sheets = ss.getSheets();
+  const pattern = /^[A-Za-z]+ \d{4}$/;
+  const pending = [];
+  for (const sheet of sheets) {
+    if (!pattern.test(sheet.getName())) continue;
+    if (sheet.getLastRow() <= 1) continue;
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, DAILY_HEADERS.length).getValues();
+    data.forEach((row, i) => {
+      if (row[14] === 'Pending') {
+        pending.push({
+          sheetName: sheet.getName(),
+          rowNum: i + 2,
+          timestamp: row[0],
+          receipt_type: row[1],
+          customer_name: row[4],
+          salesperson: row[5],
+          sale_date: row[7],
+          item_summary: row[12],
+          drive_image_link: row[15],
+          notes: row[16],
+        });
+      }
+    });
+  }
+  // Most recent first
+  pending.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+  return { ok: true, pending };
+}
+
+// ============================================================
+// markCollected — flip a Pending row to Collected
+// ============================================================
+// Payload: { sheetName, rowNum, stores_employee }
+
+function markCollected(payload) {
+  const { sheetName, rowNum, stores_employee } = payload;
+  if (!sheetName || !rowNum) return { ok: false, error: 'sheetName and rowNum required' };
+  const ss = getSheet();
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return { ok: false, error: 'Sheet not found: ' + sheetName };
+  const status = sheet.getRange(rowNum, 15).getValue();
+  if (status !== 'Pending') return { ok: false, error: 'Row is not Pending (current status: ' + status + ')' };
+
+  const now = new Date();
+  const saleDate = sheet.getRange(rowNum, 8).getValue();
+  const saleTime = sheet.getRange(rowNum, 9).getValue();
+
+  // Compute time gap
+  let timeGap = '';
+  if (saleDate && saleTime) {
+    try {
+      const dateStr = String(saleDate);
+      const [d, m, y] = (dateStr.includes('/') ? dateStr.split('/') : dateStr.split('-')).map(Number);
+      const yr = y < 100 ? 2000 + y : y;
+      const [h, min] = String(saleTime).split(':').map(Number);
+      const saleDT = new Date(yr, m - 1, d, h, min);
+      const gap = Math.round((now - saleDT) / 60000);
+      if (gap >= 0 && gap <= 43200) timeGap = gap;
+    } catch (_) { /* leave blank */ }
+  }
+
+  sheet.getRange(rowNum, 7).setValue(stores_employee || '');         // G: Stores Employee
+  sheet.getRange(rowNum, 10).setValue(now.toISOString());            // J: Collection Time
+  sheet.getRange(rowNum, 11).setValue(timeGap);                      // K: Time Gap
+  sheet.getRange(rowNum, 15).setValue('Collected');                  // O: Status
+
+  const sheetUrl = ss.getUrl() + '#gid=' + sheet.getSheetId() + '&range=A' + rowNum;
+  return { ok: true, collected: true, sheetUrl, sheetName };
+}
+
+// ============================================================
 // findByTrnxRef
 // ============================================================
 
@@ -601,6 +700,41 @@ function checkDuplicateTrnxRef(ss, trnxRef) {
     }
   }
   return null;
+}
+
+// Returns the best-matching staff name for a given raw OCR string, or null if no confident match.
+// Uses Levenshtein distance normalised by the longer string — accepts if similarity >= 0.65.
+function fuzzyMatchStaff(raw, ss) {
+  if (!raw) return null;
+  const sheet = ss.getSheetByName('Staff');
+  if (!sheet || sheet.getLastRow() <= 1) return null;
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+  const names = data.filter(r => r[0] && r[2] === true).map(r => String(r[0]).trim());
+  if (!names.length) return null;
+
+  const norm = s => s.toLowerCase().replace(/[^a-z']/g, '');
+  const rawNorm = norm(raw);
+
+  function levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    const dp = Array.from({ length: m + 1 }, (_, i) => [i]);
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++)
+      for (let j = 1; j <= n; j++)
+        dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]
+          : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    return dp[m][n];
+  }
+
+  let bestName = null, bestScore = 0;
+  for (const name of names) {
+    const nameNorm = norm(name);
+    const dist = levenshtein(rawNorm, nameNorm);
+    const maxLen = Math.max(rawNorm.length, nameNorm.length) || 1;
+    const score = 1 - dist / maxLen;
+    if (score > bestScore) { bestScore = score; bestName = name; }
+  }
+  return bestScore >= 0.65 ? bestName : null;
 }
 
 function countTrnxRefOccurrences(ss, trnxRef) {
@@ -757,6 +891,25 @@ function jsonResponse(data) {
 }
 
 // ============================================================
+// STAFF MIGRATIONS — run manually from the editor as needed
+// ============================================================
+
+function addStaffIfMissing(name, role) {
+  const ss = getSheet();
+  const sheet = ss.getSheetByName('Staff');
+  if (!sheet) return;
+  const data = sheet.getLastRow() > 1
+    ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues().flat()
+    : [];
+  if (data.map(n => String(n).toLowerCase()).includes(name.toLowerCase())) return;
+  sheet.appendRow([name, role, true]);
+}
+
+function migration_addMuteti() {
+  addStaffIfMissing('Muteti', 'Salesperson');
+}
+
+// ============================================================
 // ONE-TIME SETUP — run this manually once from the editor
 // ============================================================
 
@@ -788,6 +941,7 @@ function setupSheet() {
     ['Irene',    'Salesperson', true],
     ['Eunice',   'Salesperson', true],
     ["King'ori", 'Salesperson', true],
+    ['Muteti',   'Salesperson', true],
     ['Employee', 'Stores',      true],
     ['Owner',    'Owner',       true],
   ]);
