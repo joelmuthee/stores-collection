@@ -507,13 +507,13 @@ function PendingListScreen({ pending, onSelect, onBack, onRefresh }) {
   return (
     <div className="screen review-screen">
       <div className="topbar">
-        <div>
+        <button className="btn-icon" onClick={onBack} style={{ color: 'var(--text-muted)' }}>
+          <span>←</span>
+        </button>
+        <div style={{ flex: 1, marginLeft: 8 }}>
           <h1>📋 Pending Collections</h1>
           <div className="topbar-sub">{pending.length} awaiting collection</div>
         </div>
-        <button className="btn-icon" onClick={onBack} style={{ color: 'var(--text-muted)' }}>
-          <span>✕</span>
-        </button>
       </div>
 
       <div className="review-body">
