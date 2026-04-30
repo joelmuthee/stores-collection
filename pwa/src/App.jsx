@@ -184,7 +184,7 @@ export default function App() {
         showToast(res.error || 'Save failed. Try again.');
         return;
       }
-      setSuccessData({ trnx_ref: editedScan?.trnx_ref, flags: res.flags });
+      setSuccessData({ trnx_ref: editedScan?.trnx_ref, flags: res.flags, sheetUrl: res.sheetUrl, sheetName: res.sheetName });
       setScreen('success');
     } catch {
       setScreen('review');
@@ -207,7 +207,7 @@ export default function App() {
         setScreen('manual');
         return;
       }
-      setSuccessData({ trnx_ref: manualScan?.trnx_ref, flags: res.flags });
+      setSuccessData({ trnx_ref: manualScan?.trnx_ref, flags: res.flags, sheetUrl: res.sheetUrl, sheetName: res.sheetName });
       setScreen('success');
     } catch {
       showToast('Network error. Check your connection.');
@@ -621,6 +621,7 @@ function HandwrittenItemsTable({ items }) {
 // SuccessScreen
 // ─────────────────────────────────────────────
 function SuccessScreen({ data, onScanAnother }) {
+  const sheetUrl = data?.sheetUrl || 'https://docs.google.com/spreadsheets/d/1b0YP4BfiPYAtN-zH6VkLWE0Uo-eI-MGQFSNad1JYFhg/edit';
   return (
     <div className="screen success-screen">
       <div className="success-icon">✅</div>
@@ -635,6 +636,17 @@ function SuccessScreen({ data, onScanAnother }) {
           ⚠️ {data.flags.join(' · ')}
         </p>
       )}
+      <a
+        href={sheetUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          fontSize: '13px', color: 'var(--gold)', textDecoration: 'underline',
+          textAlign: 'center', marginTop: 4,
+        }}
+      >
+        📄 Open in Google Sheets{data?.sheetName ? ` (${data.sheetName})` : ''}
+      </a>
       <button className="btn-scan" onClick={onScanAnother} style={{ marginTop: 20 }}>
         <span>📷</span> Scan Another
       </button>

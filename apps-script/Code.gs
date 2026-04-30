@@ -233,7 +233,7 @@ function saveScan(payload) {
     }
   }
 
-  const dailyTab = getOrCreateDailyTab(ss, now);
+  const dailyTab = getOrCreateMonthTab(ss, now);
   const saleDate = scan.date || null;
   const saleTime = scan.time || null;
 
@@ -284,6 +284,8 @@ function saveScan(payload) {
   ];
 
   dailyTab.appendRow(row);
+  const savedRow = dailyTab.getLastRow();
+  const sheetUrl = ss.getUrl() + '#gid=' + dailyTab.getSheetId() + '&range=A' + savedRow;
 
   // Update Products catalog
   updateProductsCatalog(ss, items, saleDate || Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd-MM-yyyy'));
@@ -293,7 +295,7 @@ function saveScan(payload) {
     updateCustomers(ss, scan.customer_name, now);
   }
 
-  return { ok: true, saved: true, flags };
+  return { ok: true, saved: true, flags, sheetUrl, sheetName: dailyTab.getName() };
 }
 
 // ============================================================
@@ -415,12 +417,26 @@ function getDailySummary(payload) {
     ? payload.date
     : Utilities.formatDate(new Date(), tz, 'dd-MM-yyyy');
 
-  const sheet = ss.getSheetByName(today);
+  // Find the monthly tab that contains this day
+  const [d, m, y] = today.split('-');
+  const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+  const monthTabName = Utilities.formatDate(dateObj, tz, 'MMMM yyyy');
+  const sheet = ss.getSheetByName(monthTabName);
+
   if (!sheet || sheet.getLastRow() <= 1) {
     return { ok: true, date: today, total_scans: 0, collected: 0, pending: 0, total_value: 0, salespersons: {}, items_by_category: {} };
   }
 
-  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, DAILY_HEADERS.length).getValues();
+  const allData = sheet.getRange(2, 1, sheet.getLastRow() - 1, DAILY_HEADERS.length).getValues();
+  // Filter to rows saved on the requested day
+  const data = allData.filter(row => {
+    if (!row[0]) return false;
+    return Utilities.formatDate(new Date(row[0]), tz, 'dd-MM-yyyy') === today;
+  });
+
+  if (!data.length) {
+    return { ok: true, date: today, total_scans: 0, collected: 0, pending: 0, total_value: 0, salespersons: {}, items_by_category: {} };
+  }
 
   let totalValue = 0;
   let collected = 0;
@@ -429,10 +445,10 @@ function getDailySummary(payload) {
   const itemsByCategory = {};
 
   data.forEach(row => {
-    const status = row[16]; // Q: Status
-    const total = parseFloat(row[15]) || 0; // P: Total Amount
-    const salesperson = row[6]; // G: Salesperson
-    const itemsJson = row[13]; // N: Items (JSON)
+    const status = row[16];
+    const total = parseFloat(row[15]) || 0;
+    const salesperson = row[6];
+    const itemsJson = row[13];
 
     totalValue += total;
     if (status === 'Collected') collected++;
@@ -472,8 +488,15 @@ function getMonthSummary(payload) {
   const targetMonth = (payload && payload.month) ? parseInt(payload.month) : now.getMonth() + 1;
   const targetYear = (payload && payload.year) ? parseInt(payload.year) : now.getFullYear();
 
-  const sheets = ss.getSheets();
-  const pattern = /^(\d{2})-(\d{2})-(\d{4})$/;
+  const monthDate = new Date(targetYear, targetMonth - 1, 1);
+  const monthTabName = Utilities.formatDate(monthDate, tz, 'MMMM yyyy');
+  const sheet = ss.getSheetByName(monthTabName);
+
+  if (!sheet || sheet.getLastRow() <= 1) {
+    return { ok: true, month: targetMonth, year: targetYear, total_scans: 0, total_value: 0, collected: 0, pending: 0, salespersons: {}, top_customers: [], daily_breakdown: [] };
+  }
+
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, DAILY_HEADERS.length).getValues();
 
   let totalScans = 0;
   let totalValue = 0;
@@ -481,36 +504,28 @@ function getMonthSummary(payload) {
   let pending = 0;
   const salespersons = {};
   const customers = {};
-  const dailyBreakdown = [];
+  const dailyMap = {};
 
-  sheets.forEach(sheet => {
-    const match = sheet.getName().match(pattern);
-    if (!match) return;
-    const [, d, m, y] = match;
-    if (parseInt(m) !== targetMonth || parseInt(y) !== targetYear) return;
-    if (sheet.getLastRow() <= 1) return;
+  data.forEach(row => {
+    if (!row[0]) return;
+    const status = row[16];
+    const total = parseFloat(row[15]) || 0;
+    const sp = row[6];
+    const cust = row[5];
 
-    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, DAILY_HEADERS.length).getValues();
-    let dayValue = 0;
+    totalScans++;
+    totalValue += total;
+    if (status === 'Collected') collected++; else pending++;
+    if (sp) salespersons[sp] = (salespersons[sp] || 0) + 1;
+    if (cust) customers[cust] = (customers[cust] || 0) + 1;
 
-    data.forEach(row => {
-      const status = row[16];
-      const total = parseFloat(row[15]) || 0;
-      const sp = row[6];
-      const cust = row[5];
-
-      totalScans++;
-      totalValue += total;
-      dayValue += total;
-      if (status === 'Collected') collected++; else pending++;
-      if (sp) salespersons[sp] = (salespersons[sp] || 0) + 1;
-      if (cust) customers[cust] = (customers[cust] || 0) + 1;
-    });
-
-    dailyBreakdown.push({ date: sheet.getName(), scans: data.length, value: dayValue });
+    const dayKey = Utilities.formatDate(new Date(row[0]), tz, 'dd-MM-yyyy');
+    if (!dailyMap[dayKey]) dailyMap[dayKey] = { date: dayKey, scans: 0, value: 0 };
+    dailyMap[dayKey].scans++;
+    dailyMap[dayKey].value += total;
   });
 
-  dailyBreakdown.sort((a, b) => a.date.localeCompare(b.date));
+  const dailyBreakdown = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
 
   return {
     ok: true,
@@ -559,9 +574,9 @@ function getStaff() {
 // SHEET HELPERS
 // ============================================================
 
-function getOrCreateDailyTab(ss, date) {
+function getOrCreateMonthTab(ss, date) {
   const tz = Session.getScriptTimeZone();
-  const tabName = Utilities.formatDate(date, tz, 'dd-MM-yyyy');
+  const tabName = Utilities.formatDate(date, tz, 'MMMM yyyy'); // e.g. "April 2025"
   let sheet = ss.getSheetByName(tabName);
   if (!sheet) {
     sheet = ss.insertSheet(tabName);
@@ -579,7 +594,7 @@ function getOrCreateDailyTab(ss, date) {
 
 function checkDuplicateTrnxRef(ss, trnxRef) {
   const sheets = ss.getSheets();
-  const pattern = /^\d{2}-\d{2}-\d{4}$/;
+  const pattern = /^[A-Za-z]+ \d{4}$/; // matches "April 2025", "May 2025", etc.
   for (const sheet of sheets) {
     if (!pattern.test(sheet.getName())) continue;
     if (sheet.getLastRow() <= 1) continue;
@@ -836,4 +851,434 @@ function setupSheet() {
 
   SpreadsheetApp.flush();
   Logger.log('Setup complete. Tabs created: Products, Aliases, Customers, Staff.');
+}
+
+// ============================================================
+// addChumaProducts — run ONCE to add Chuma category products
+// ============================================================
+
+function addChumaProducts() {
+  const ss = getSheet();
+  const sheet = ss.getSheetByName('Products');
+  if (!sheet) { Logger.log('Products tab not found. Run setupSheet() first.'); return; }
+
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MM-yyyy');
+
+  // Get existing product names to avoid duplicates
+  const lastRow = sheet.getLastRow();
+  const existing = lastRow > 1
+    ? sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat().map(n => String(n).toLowerCase().trim())
+    : [];
+
+  const chuma = [
+    // Square / rectangular tubes
+    ['1-1/2x1-1/2x16g',           'pcs'],
+    ['3x2x3mm',                   'pcs'],
+    ['4x4x3mm',                   'pcs'],
+    ['1-1/4x1-1/4x16g',           'pcs'],
+    ['3/4x3/4x16g tube',          'pcs'],
+    ['1/2x1/2x18g',               'pcs'],
+    ['3x2x16g',                   'pcs'],
+    ['5/8x5/8x16g',               'pcs'],
+    ['2-1/2x1-1/2x16g',           'pcs'],
+    ['4x2x14g',                   'pcs'],
+    ['8x4x18g',                   'pcs'],
+    ['2x1x2mm 14g',               'pcs'],
+    ['8x4x2mm 14g',               'pcs'],
+    ['3/4x3/4x18g',               'pcs'],
+    ['2x1x18g',                   'pcs'],
+    ['3x3x14g',                   'pcs'],
+    ['2x2x16g',                   'pcs'],
+    ['1-1/2x1-1/2x18g',           'pcs'],
+    ['2x2x18g 1mm',               'pcs'],
+    ['Black Sheet 8x4x18g',       'pcs'],
+    ['4x4x14g',                   'pcs'],
+    ['1x1x16g',                   'pcs'],
+    ['2x1x16g',                   'pcs'],
+    ['5/8x5/8x18g',               'pcs'],
+    ['1-1/2x1x18g',               'pcs'],
+    ['1-1/2x1x16g',               'pcs'],
+    // Round pipe / tube
+    ['Round Pipe 5/8x18g',        'pcs'],
+    ['Round Pipe 3"',             'pcs'],
+    ['Round Pipe 2x18g',          'pcs'],
+    ['Round Pipe 1-1/2x16g',      'pcs'],
+    ['Round Pipe 1-1/4x16g',      'pcs'],
+    ['Round Pipe 1x16g',          'pcs'],
+    ['Round Pipe 2x16g',          'pcs'],
+    ['Round Pipe 3/4x16g',        'pcs'],
+    ['Round Pipe 1-1/2x18g',      'pcs'],
+    ['Round Pipe 1x18g',          'pcs'],
+    ['Round Pipe 2-1/2x16g',      'pcs'],
+    ['Round Pipe 3/4x18g',        'pcs'],
+    ['Round Pipe 1-1/4x18g',      'pcs'],
+    ['Round Pipe Furniture 3" 18g','pcs'],
+    // Black pipe tubes
+    ['Black Pipe Tube 1/2"',      'pcs'],
+    ['Black Pipe Tube 3/4"',      'pcs'],
+    ['Black Pipe Tube 1"',        'pcs'],
+    ['Black Pipe Tube 1-1/4"',    'pcs'],
+    ['Black Pipe Tube 1-1/2"',    'pcs'],
+    ['Black Pipe Tube 2"',        'pcs'],
+    ['Black Pipe Tube 2-1/2"',    'pcs'],
+    ['Black Pipe Tube 3"',        'pcs'],
+    ['Black Pipe Tube 4"',        'pcs'],
+    ['3" 14g',                    'pcs'],
+    // Flat bar
+    ['Flat 3/4x1/4',              'pcs'],
+    ['Flat 2x1/4',                'pcs'],
+    ['Flat 3x1/4',                'pcs'],
+    ['Flat 4x1/4',                'pcs'],
+    ['Flat 1-1/2x1/4',            'pcs'],
+    ['Flat 2x1/8',                'pcs'],
+    ['Flat 3/4x1/8',              'pcs'],
+    ['Flat 1x1/8',                'pcs'],
+    ['Flat 1x1/4',                'pcs'],
+    ['Flat 1-1/2x1/8',            'pcs'],
+    // Angle line
+    ['Angle Line 2x1/8',          'pcs'],
+    ['Angle Line 1x1/8',          'pcs'],
+    ['Angle Line 1-1/2x3/16',     'pcs'],
+    ['Angle Line 2x1/4',          'pcs'],
+    ['Angle Line 1-1/2x1/4',      'pcs'],
+    ['Angle Line 3/4x1/8',        'pcs'],
+    ['Angle Line 1-1/2x1/8',      'pcs'],
+    // Zed
+    ['Zed 3/4',                   'pcs'],
+    ['Zed STD 3/4',               'pcs'],
+    ['Zed 3/4 Sub',               'pcs'],
+    ['Zed 3/4 Standard',          'pcs'],
+    ['Zed 1"',                    'pcs'],
+    // Sheets & plates
+    ['Chequered Plate 8x4x1.0mm', 'pcs'],
+    ['Teardrop 8x4x1.6mm',        'pcs'],
+    ['Teardrop 8x4x16g Embossed', 'pcs'],
+    ['Chaker Plate',              'pcs'],
+    ['P.U Sheet',                 'pcs'],
+    ['Perforated Sheet 6x3',      'pcs'],
+    ['Decorated Sheet 2x2',       'pcs'],
+    ['Black Sheet 7x3x18g',       'pcs'],
+    ['Black Sheet 6x3x18g',       'pcs'],
+    ['Black Sheet 8x4x16g 1.3mm', 'pcs'],
+    // D rebars (additional sizes not in seed)
+    ['D-32',                      'pcs'],
+    // Round bars
+    ['Round 6',                   'pcs'],
+    ['Round 8',                   'pcs'],
+    ['Round 10',                  'pcs'],
+    ['Round 12',                  'pcs'],
+    ['Round 16',                  'pcs'],
+    ['Round 16 Per Ft',           'pcs'],
+    ['16 Hammered',               'pcs'],
+    ['12 Hammered',               'pcs'],
+    ['Square 10',                 'pcs'],
+    ['Square 12',                 'pcs'],
+    ['Square 16',                 'pcs'],
+    // Chrome / tee / other fittings
+    ['Chrome Pipe 1"',            'pcs'],
+    ['Chrome Pipe 3/4"',          'pcs'],
+    ['Chrome Caps 3/4"',          'pcs'],
+    ['Chrome Caps 1"',            'pcs'],
+    ['Tee 3/4"',                  'pcs'],
+    ['Tee 1"',                    'pcs'],
+    ['U Channel',                 'pcs'],
+    ['Rivets',                    'pcs'],
+    // Curtain rods & hardware
+    ['Curtain Rod 1m',            'pcs'],
+    ['Curtain Rod 2m',            'pcs'],
+    ['Curtain Rod 3m',            'pcs'],
+    ['Curtain Rod Brackets',      'pcs'],
+    ['Gate Handle Flat Konji',    'pcs'],
+    ['Center Stoppers',           'pcs'],
+    ['Down Stoppers',             'pcs'],
+    // PV profiles
+    ['PV Z',                      'pcs'],
+    ['PV U',                      'pcs'],
+    ['Pv',                        'pcs'],
+    // Discs & consumables
+    ['Grinding Disc 9"',          'pcs'],
+    ['Flap Disc 7"',              'pcs'],
+    // Wire & iron
+    ['Binding Wire Roll',         'rolls'],
+    ['Hoop Iron',                 'kg'],
+    ['Sugarcane',                 'pcs'],
+    // Rods
+    ['Rods AGI',                  'pcs'],
+    ['Rods Maruiti',              'pcs'],
+  ];
+
+  let added = 0;
+  chuma.forEach(([name, unit]) => {
+    if (existing.includes(name.toLowerCase().trim())) return; // skip duplicates
+    sheet.appendRow([name, 'Chuma', today, 0, '', '', unit, true]);
+    existing.push(name.toLowerCase().trim());
+    added++;
+  });
+
+  SpreadsheetApp.flush();
+  Logger.log('Chuma products added: ' + added);
+}
+
+// ============================================================
+// addTanksProducts — run ONCE to add Tanks category products
+// ============================================================
+
+function addTanksProducts() {
+  const ss = getSheet();
+  const sheet = ss.getSheetByName('Products');
+  if (!sheet) { Logger.log('Products tab not found. Run setupSheet() first.'); return; }
+
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MM-yyyy');
+
+  const lastRow = sheet.getLastRow();
+  const existing = lastRow > 1
+    ? sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat().map(n => String(n).toLowerCase().trim())
+    : [];
+
+  const tanks = [
+    'Roto Tank 2500L',
+    'Top Tank 2500L',
+    'Roto Tank 920L',
+    'Top Tank 10000L',
+    'Vectus Tank 10000L Short',
+    'Top Tank Rectangular 1000L',
+    'Top Tank 5000L',
+    'Top Tank 3000L',
+    'Top Tank 2300L',
+    'Top Tank 2000L',
+    'Top Tank 1500L',
+    'Top Tank Cylindrical 1000L',
+    'Top Tank 500L',
+    'Lockable Tank 1/4"',
+    'Lockable Tank 1/2"',
+    'Vectus Square 1000L',
+    'Vectus Tank 1500L',
+    'Vectus Tank 2000L',
+    'Vectus Tank 8000L',
+    'Techno Square 1000L',
+    'Techno Tank 1500L',
+    'Techno Tank 6000L',
+    'Techno Tank 8000L',
+    'Roto Tank 1000L',
+    'Roto Tank 2000L',
+    'Roto Tank 6000L',
+    'Skyplast Tank 210L',
+    'Vectus Square 500L',
+    'Vectus Tank 500L',
+    'Vectus Tank 1000L Cylindrical',
+    'Vectus Tank 2500L',
+    'Techno Square 500L',
+    'Vectus Tank Loft 500L Double Layer',
+    'Vectus Tank Loft 1000L Double Layer',
+    'Techno Tank 1000L',
+    'Techno Tank 2000L',
+    'Techno Tank 3000L',
+    'Techno Tank 10000L',
+    'Roto Tank 1500L',
+    'Roto Tank 2300L',
+    'Roto Tank 4000L',
+    'Roto Tank 10000L',
+    'Vectus Tank 6000L',
+    'Techno Tank 2300L',
+    'Techno Tank 2500L',
+    'Techno Tank 4000L',
+    'Techno Tank 5000L',
+    'Roto Tank 5000L Short',
+    'Vectus Tank 1000L Short',
+    'Vectus Tank 2300L',
+    'Vectus Tank 3000L',
+    'Vectus Tank 4000L',
+    'Vectus Tank 5000L',
+    'Vectus Tank 10000L',
+    'Techno Tank 500L',
+    'Roto Tank 3000L',
+    'Roto Tank 8000L',
+  ];
+
+  let added = 0;
+  tanks.forEach(name => {
+    if (existing.includes(name.toLowerCase().trim())) return;
+    sheet.appendRow([name, 'Tanks', today, 0, '', '', 'pcs', true]);
+    existing.push(name.toLowerCase().trim());
+    added++;
+  });
+
+  SpreadsheetApp.flush();
+  Logger.log('Tanks products added: ' + added);
+}
+
+// ============================================================
+// addWoodenProducts — run ONCE to add Wooden category products
+// ============================================================
+
+function addWoodenProducts() {
+  const ss = getSheet();
+  const sheet = ss.getSheetByName('Products');
+  if (!sheet) { Logger.log('Products tab not found. Run setupSheet() first.'); return; }
+
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MM-yyyy');
+
+  const lastRow = sheet.getLastRow();
+  const existing = lastRow > 1
+    ? sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat().map(n => String(n).toLowerCase().trim())
+    : [];
+
+  const wooden = [
+    'Particle Board Stone Grey',
+    'MDF Board Stone Grey',
+    'MDF Plain TZ',
+    'MDF Screw 1"',
+    'Ceiling Board',
+    'Lam MDF Cherry 2 Side',
+    'Particle Board 18mm',
+    'MDF Ply 3mm',
+    'Gypsum Board Blue Swan',
+    'American Walnut Particle Board',
+    'American Walnut MDF Board',
+    'Lipping Stoney Grey',
+    'Panel Door',
+    'Soft Board',
+    'MDF Ply White',
+    'MDF Light Grey',
+    'Blockboard',
+    'Particle Chipboard Coimbra',
+    'T.N.G Ceiling Light',
+    'Cornice Plain',
+    'PVC Ceiling 020',
+    'MDF Boards Salza',
+    '6 Ply 6mm Plywood',
+    'Gypsum Board',
+    'PVC Ceiling 027',
+    'Particle Chipboard Dark Grey',
+    'Malpha Hinge Non Hydraulic',
+    'MDF Boards Black Cherry',
+    'MDF Boards Salza',
+    'MDF Boards Beech',
+    'Particle Chipboard Cherry',
+    'Particle Chipboard Salza',
+    'Particle Chipboard White',
+    'Marine Board',
+    'Door Handles Gold',
+    'Doors Panel',
+    'Chip Board Cherry',
+    'Particle Chipboard Beech',
+    'Plywood 6mm',
+    'MDF Boards White',
+    'MDF Boards Flower',
+    'Doors Flush',
+    'PVC Corners',
+    'PVC H/G',
+    'Cornices 4 W01"',
+    'Dark Walnut',
+    'Chip Board Flower',
+    'Blockboard 3/4 18mm',
+    'Plywood 3mm',
+    'PVC Ceiling',
+    'Channels',
+    'MDF Boards Cherry',
+    'MDF Boards Coimbra',
+    'MDF Boards Particle',
+    'MDF Board Plain',
+    'Doors Button',
+    'Chip Board Plain',
+  ];
+
+  let added = 0;
+  wooden.forEach(name => {
+    if (existing.includes(name.toLowerCase().trim())) return;
+    sheet.appendRow([name, 'Wooden', today, 0, '', '', 'pcs', true]);
+    existing.push(name.toLowerCase().trim());
+    added++;
+  });
+
+  SpreadsheetApp.flush();
+  Logger.log('Wooden products added: ' + added);
+}
+
+// ============================================================
+// addWiresProducts — run ONCE to add Wires category products
+// ============================================================
+
+function addWiresProducts() {
+  const ss = getSheet();
+  const sheet = ss.getSheetByName('Products');
+  if (!sheet) { Logger.log('Products tab not found. Run setupSheet() first.'); return; }
+
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MM-yyyy');
+
+  const lastRow = sheet.getLastRow();
+  const existing = lastRow > 1
+    ? sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat().map(n => String(n).toLowerCase().trim())
+    : [];
+
+  const wires = [
+    ['Green Razor Wire',                  'rolls'],
+    ['Chicken Wire 3/4"',                 'rolls'],
+    ['Chicken Wire 1/2"',                 'rolls'],
+    ['Chicken Wire 1"',                   'rolls'],
+    ['Nail Bag 5"',                       'bags'],
+    ['Green Gauze Wire',                  'rolls'],
+    ['Chain Link 6ft 14g',                'rolls'],
+    ['Nails Bag 2-1/2"',                  'bags'],
+    ['Nails Bag 3"',                      'bags'],
+    ['Nails Bag 4"',                      'bags'],
+    ['Barbed Wire 610m',                  'rolls'],
+    ['MTR Abyssinia 480m',                'rolls'],
+    ['MTR Abyssinia 610m',                'rolls'],
+    ['MTR Zingira 610m',                  'rolls'],
+    ['Barbed Wire 610m Blue',             'rolls'],
+    ['Plastic Mesh Per Metre',            'rolls'],
+    ['Wiremesh M/G',                      'rolls'],
+    ['Green Net',                         'rolls'],
+    ['BRC A65 Std',                       'pcs'],
+    ['Chain Big',                         'pcs'],
+    ['Chain Small',                       'pcs'],
+    ['Chain 6mm',                         'pcs'],
+    ['Crimped Wire Brush',                'pcs'],
+    ['Coffee Tray Soldered',              'pcs'],
+    ['MTS 610m Farasi',                   'rolls'],
+    ['Barbed Wire 480m',                  'rolls'],
+    ['Expanded Wire H/G',                 'rolls'],
+    ['Expanded Wire L/G',                 'rolls'],
+    ['Expanded Wire M/G',                 'rolls'],
+    ['Barbed Wire 610m Abyssinia',        'rolls'],
+    ['Chain Link 6ft 14g HG',            'rolls'],
+    ['Chain Link 5ft 14g HG',            'rolls'],
+    ['Wiremesh L/G',                      'rolls'],
+    ['Wiremesh H/G',                      'rolls'],
+    ['Wiremesh 8x4 50x50 3.5mm',         'rolls'],
+    ['610 MTS Ngombe',                    'rolls'],
+    ['610 MTS Kifaru',                    'rolls'],
+    ['610 MTS DVK',                       'rolls'],
+    ['Chain Link 7ft',                    'rolls'],
+    ['BRC Wire A142 Std',                 'pcs'],
+    ['BRC Wire A98',                      'pcs'],
+    ['BRC Wire A66',                      'pcs'],
+    ['Kuku Net 1/2"',                     'rolls'],
+    ['Kuku Net 3/4"',                     'rolls'],
+    ['Perforated Sheet Sieve',            'pcs'],
+    ['180 MTS Nyati',                     'rolls'],
+    ['Chain Link 5ft',                    'rolls'],
+    ['Chain Link 6ft',                    'rolls'],
+    ['BRC Wire A98 Std',                  'pcs'],
+    ['Razor Wire',                        'rolls'],
+    ['Goose Wire',                        'rolls'],
+    ['480 MTS DVK',                       'rolls'],
+    ['BRC Wire A610',                     'pcs'],
+    ['3/4x30m Ngombe',                    'rolls'],
+    ['Medium Dog Chain',                  'pcs'],
+    ['Galvanized Wire',                   'rolls'],
+    ['Chain Link 4ft',                    'rolls'],
+  ];
+
+  let added = 0;
+  wires.forEach(([name, unit]) => {
+    if (existing.includes(name.toLowerCase().trim())) return;
+    sheet.appendRow([name, 'Wires', today, 0, '', '', unit, true]);
+    existing.push(name.toLowerCase().trim());
+    added++;
+  });
+
+  SpreadsheetApp.flush();
+  Logger.log('Wires products added: ' + added);
 }
