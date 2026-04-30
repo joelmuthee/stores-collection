@@ -80,6 +80,10 @@ function doGet(e) {
   if (action === 'getMonthSummary')  return jsonResponse(getMonthSummary(e.parameter));
   if (action === 'getStaff')         return jsonResponse(getStaff());
   if (action === 'getPendingCollections') return jsonResponse(getPendingCollections());
+  if (action === 'addStaff') {
+    addStaffIfMissing(e.parameter.name, e.parameter.role || 'Salesperson');
+    return jsonResponse({ ok: true, added: e.parameter.name });
+  }
   return jsonResponse({ ok: true, message: 'Oloolua Collection System is running.' });
 }
 
