@@ -42,6 +42,7 @@ export default function App() {
   const [successData, setSuccessData] = useState(null);
   const [notes, setNotes] = useState('');
   const [staffList, setStaffList] = useState([]);
+  const [partialPickup, setPartialPickup] = useState(false);
   const toastTimer = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -183,7 +184,8 @@ export default function App() {
         stores_employee: employee || undefined,
         notes: notes || undefined,
         drive_image_link,
-        ...(force && { force: true }),
+        ...((force || partialPickup) && { force: true }),
+        ...(partialPickup && { status: 'Partial' }),
       };
       const res = await saveScan(payload);
       if (!res.ok && res.duplicate && !force) {
@@ -234,6 +236,7 @@ export default function App() {
     setDupeBanner(null);
     setSuccessData(null);
     setNotes('');
+    setPartialPickup(false);
     setScreen('home');
   };
 
@@ -281,6 +284,8 @@ export default function App() {
           dupeBanner={dupeBanner}
           notes={notes}
           onNotesChange={setNotes}
+          partialPickup={partialPickup}
+          onPartialPickupChange={setPartialPickup}
           onFieldChange={(field, value) => setEditedScan(prev => ({ ...prev, [field]: value }))}
           onItemChange={(idx, field, value) => setEditedScan(prev => {
             const items = [...(prev.items || [])];
@@ -406,6 +411,7 @@ function ProcessingScreen({ image, text }) {
 function ReviewScreen({
   scan, editedScan, image, employee, staffList,
   dupeBanner, notes, onNotesChange,
+  partialPickup, onPartialPickupChange,
   onFieldChange, onItemChange,
   onSubmit, onForceSubmit, onBack,
 }) {
@@ -472,6 +478,23 @@ function ReviewScreen({
             />
           </div>
         </div>
+
+        <label
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '12px 14px', background: 'var(--surface)',
+            borderRadius: 12, border: '1px solid var(--border)',
+            cursor: 'pointer', fontSize: 14, color: 'var(--text)',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={partialPickup}
+            onChange={e => onPartialPickupChange(e.target.checked)}
+            style={{ width: 18, height: 18, accentColor: 'var(--gold)' }}
+          />
+          <span>Partial pickup <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>(customer collecting balance later)</span></span>
+        </label>
 
         {employee && (
           <p style={{ textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)', paddingBottom: 4 }}>

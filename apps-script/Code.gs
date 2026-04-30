@@ -220,8 +220,8 @@ function saveScan(payload) {
   const scan = payload.scan;
   const now = new Date();
 
-  // Duplicate check for printed receipts
-  if (scan.trnx_ref) {
+  // Duplicate check for printed receipts (skip if force=true, e.g. partial pickup)
+  if (scan.trnx_ref && !payload.force) {
     const dupe = checkDuplicateTrnxRef(ss, scan.trnx_ref);
     if (dupe) {
       return {
@@ -231,6 +231,13 @@ function saveScan(payload) {
         existing_row: dupe,
       };
     }
+  }
+
+  // Compute pickup number for partial pickups
+  let statusValue = payload.status || 'Collected';
+  if (payload.status === 'Partial' && scan.trnx_ref) {
+    const pickupNum = countTrnxRefOccurrences(ss, scan.trnx_ref) + 1;
+    statusValue = 'Partial #' + pickupNum;
   }
 
   const dailyTab = getOrCreateMonthTab(ss, now);
@@ -275,7 +282,7 @@ function saveScan(payload) {
     items.length,                               // L: Item Count
     itemSummary,                                // M: Item Summary
     scan.total !== undefined ? scan.total : '', // N: Total Amount
-    payload.status || 'Collected',              // O: Status
+    statusValue,                                 // O: Status
     payload.drive_image_link || '',             // P: Drive Image Link
     payload.notes || '',                        // Q: Notes
     flags.join('; '),                           // R: Flag
@@ -587,13 +594,26 @@ function checkDuplicateTrnxRef(ss, trnxRef) {
   for (const sheet of sheets) {
     if (!pattern.test(sheet.getName())) continue;
     if (sheet.getLastRow() <= 1) continue;
-    const refs = sheet.getRange(2, 4, sheet.getLastRow() - 1, 1).getValues().flat();
+    const refs = sheet.getRange(2, 3, sheet.getLastRow() - 1, 1).getValues().flat();
     const idx = refs.indexOf(trnxRef);
     if (idx >= 0) {
       return { sheet: sheet.getName(), row: idx + 2 };
     }
   }
   return null;
+}
+
+function countTrnxRefOccurrences(ss, trnxRef) {
+  const sheets = ss.getSheets();
+  const pattern = /^[A-Za-z]+ \d{4}$/;
+  let count = 0;
+  for (const sheet of sheets) {
+    if (!pattern.test(sheet.getName())) continue;
+    if (sheet.getLastRow() <= 1) continue;
+    const refs = sheet.getRange(2, 3, sheet.getLastRow() - 1, 1).getValues().flat();
+    count += refs.filter(r => r === trnxRef).length;
+  }
+  return count;
 }
 
 function updateProductsCatalog(ss, items, saleDate) {
