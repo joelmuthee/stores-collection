@@ -411,7 +411,7 @@ function ProcessingScreen({ image, text }) {
 // ─────────────────────────────────────────────
 // ReviewScreen
 // ─────────────────────────────────────────────
-const STORES_EMPLOYEES = ["King'ori", 'Maurine', 'Njoroge', 'Joel', 'Irene'];
+const STORES_EMPLOYEES = ["King'ori", 'Maurine', 'Njoroge', 'Joel', 'Irene', 'Muteti'];
 
 function ReviewScreen({
   scan, editedScan, image, employee, onEmployeeChange, staffList,
