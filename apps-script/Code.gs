@@ -203,6 +203,18 @@ function runOcr(payload) {
   const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
   const scan = JSON.parse(cleaned);
 
+  // Save image to Drive in the same call so the PWA doesn't have to upload it twice.
+  let drive_image_link = null;
+  try {
+    const up = uploadImage({
+      image_base64: payload.image,
+      mime_type: mediaType,
+      trnx_ref: scan.trnx_ref,
+      date: scan.date,
+    });
+    if (up?.ok) drive_image_link = up.drive_link;
+  } catch (_) { /* non-fatal */ }
+
   // Sanitise impossible time values
   if (scan.time) {
     const parts = scan.time.split(':').map(Number);
@@ -229,7 +241,7 @@ function runOcr(payload) {
     }
   }
 
-  return { ok: true, scan };
+  return { ok: true, scan, drive_image_link };
 }
 
 // ============================================================

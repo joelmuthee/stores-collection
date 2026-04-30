@@ -18,7 +18,7 @@ function nowHHMM() {
   return [d.getHours(), d.getMinutes()].map(n => String(n).padStart(2, '0')).join(':');
 }
 // Resize a Blob to max `maxDim` px on the longest side, returns a new JPEG Blob
-function resizeBlob(blob, maxDim = 2000) {
+function resizeBlob(blob, maxDim = 1400) {
   return new Promise((resolve) => {
     const img = new Image();
     const url = URL.createObjectURL(blob);
@@ -29,7 +29,7 @@ function resizeBlob(blob, maxDim = 2000) {
       canvas.width = Math.round(img.width * scale);
       canvas.height = Math.round(img.height * scale);
       canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(resolve, 'image/jpeg', 0.92);
+      canvas.toBlob(resolve, 'image/jpeg', 0.85);
     };
     img.src = url;
   });
@@ -168,6 +168,10 @@ export default function App() {
       }
       setScan(res.scan);
       setEditedScan(JSON.parse(JSON.stringify(res.scan)));
+      // OCR also saved the image to Drive — capture the link so we don't re-upload.
+      if (res.drive_image_link) {
+        setCapturedImage(prev => prev ? { ...prev, driveLink: res.drive_image_link } : prev);
+      }
       setScreen('review');
     } catch {
       showToast('Network error. Check your connection.');
@@ -256,10 +260,12 @@ export default function App() {
       return;
     }
 
-    setProcessingText('Uploading image…');
+    setProcessingText('Saving…');
     setScreen('processing');
-    let drive_image_link;
-    if (capturedImage?.base64) {
+    // Image was already uploaded by OCR — reuse that link.
+    let drive_image_link = capturedImage?.driveLink;
+    // Fallback for manual entry (no OCR step) — upload now.
+    if (!drive_image_link && capturedImage?.base64) {
       const up = await uploadImage(
         capturedImage.base64,
         capturedImage.mediaType,
@@ -268,7 +274,6 @@ export default function App() {
       );
       if (up?.ok) drive_image_link = up.drive_link;
     }
-    setProcessingText('Saving…');
     try {
       const payload = { ...basePayload, drive_image_link };
       const res = await saveScan(payload);
