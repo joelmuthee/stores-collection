@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { runOcr, saveScan, getStaff, uploadImage, getPendingCollections, markCollected } from './api.js';
+import { enqueue, queueSize, drainQueue } from './queue.js';
 
 function driveThumbnailUrl(driveUrl, size = 1000) {
   const m = driveUrl?.match(/\/d\/([^/]+)/);
@@ -52,6 +53,8 @@ export default function App() {
   const [flowMode, setFlowMode] = useState('collect'); // 'collect' | 'authorize'
   const [pendingList, setPendingList] = useState([]);
   const [selectedPending, setSelectedPending] = useState(null);
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [queuedCount, setQueuedCount] = useState(() => queueSize());
   const toastTimer = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -97,6 +100,59 @@ export default function App() {
       if (res?.staff) setStaffList(res.staff.map(s => s.name).filter(Boolean));
     }).catch(() => {});
   }, []);
+
+  // Runner that replays a queued operation. Returns { ok }.
+  const runQueued = async (entry) => {
+    if (entry.kind === 'saveScan') {
+      let drive_image_link = entry.payload.drive_image_link;
+      if (!drive_image_link && entry.payload._image) {
+        const up = await uploadImage(
+          entry.payload._image.base64,
+          entry.payload._image.mediaType,
+          entry.payload.scan?.trnx_ref,
+          entry.payload.scan?.date,
+        );
+        if (up?.ok) drive_image_link = up.drive_link;
+        else if (up && up.error?.startsWith('Network')) return { ok: false };
+      }
+      const { _image, ...payload } = entry.payload;
+      payload.drive_image_link = drive_image_link;
+      const res = await saveScan(payload);
+      // Treat duplicate as success — already saved earlier
+      if (res?.ok || res?.duplicate) return { ok: true };
+      if (res?.error?.startsWith('Network')) return { ok: false };
+      // Permanent error — drop from queue
+      return { ok: true };
+    }
+    if (entry.kind === 'markCollected') {
+      const { sheetName, rowNum, stores_employee } = entry.payload;
+      const res = await markCollected(sheetName, rowNum, stores_employee);
+      if (res?.ok) return { ok: true };
+      if (res?.error?.startsWith('Network')) return { ok: false };
+      return { ok: true };
+    }
+    return { ok: true };
+  };
+
+  const trySync = async () => {
+    if (!navigator.onLine) return;
+    if (queueSize() === 0) return;
+    await drainQueue(runQueued);
+    setQueuedCount(queueSize());
+  };
+
+  useEffect(() => {
+    const onOnline = () => { setIsOnline(true); trySync(); };
+    const onOffline = () => setIsOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    // Drain on load too in case there's pending work
+    trySync();
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const processImage = async (base64, mediaType, type) => {
     setDupeBanner(null);
@@ -175,6 +231,31 @@ export default function App() {
 
   const handleSubmit = async (force = false) => {
     const isAuthorize = flowMode === 'authorize';
+    const basePayload = {
+      scan: editedScan,
+      stores_employee: isAuthorize ? undefined : (employee || undefined),
+      notes: notes || undefined,
+      ...((force || partialPickup) && { force: true }),
+      ...(isAuthorize ? { status: 'Pending' } : (partialPickup && { status: 'Partial' })),
+    };
+
+    // Offline → queue immediately
+    if (!navigator.onLine) {
+      enqueue('saveScan', {
+        ...basePayload,
+        _image: capturedImage?.base64 ? { base64: capturedImage.base64, mediaType: capturedImage.mediaType } : undefined,
+      });
+      setQueuedCount(queueSize());
+      setSuccessData({
+        trnx_ref: editedScan?.trnx_ref,
+        flags: [],
+        mode: isAuthorize ? 'authorized' : 'collected',
+        queued: true,
+      });
+      setScreen('success');
+      return;
+    }
+
     setProcessingText('Uploading image…');
     setScreen('processing');
     let drive_image_link;
@@ -189,14 +270,7 @@ export default function App() {
     }
     setProcessingText('Saving…');
     try {
-      const payload = {
-        scan: editedScan,
-        stores_employee: isAuthorize ? undefined : (employee || undefined),
-        notes: notes || undefined,
-        drive_image_link,
-        ...((force || partialPickup) && { force: true }),
-        ...(isAuthorize ? { status: 'Pending' } : (partialPickup && { status: 'Partial' })),
-      };
+      const payload = { ...basePayload, drive_image_link };
       const res = await saveScan(payload);
       if (!res.ok && res.duplicate && !force) {
         setScreen('review');
@@ -204,6 +278,23 @@ export default function App() {
         return;
       }
       if (!res.ok) {
+        // Network-style error → queue and show success-as-queued
+        if (res.error?.startsWith('Network') || res.error?.startsWith('Read')) {
+          enqueue('saveScan', {
+            ...basePayload,
+            _image: capturedImage?.base64 ? { base64: capturedImage.base64, mediaType: capturedImage.mediaType } : undefined,
+            drive_image_link,
+          });
+          setQueuedCount(queueSize());
+          setSuccessData({
+            trnx_ref: editedScan?.trnx_ref,
+            flags: [],
+            mode: isAuthorize ? 'authorized' : 'collected',
+            queued: true,
+          });
+          setScreen('success');
+          return;
+        }
         setScreen('review');
         showToast(res.error || 'Save failed. Try again.');
         return;
@@ -217,8 +308,19 @@ export default function App() {
       });
       setScreen('success');
     } catch {
-      setScreen('review');
-      showToast('Network error. Check your connection.');
+      enqueue('saveScan', {
+        ...basePayload,
+        _image: capturedImage?.base64 ? { base64: capturedImage.base64, mediaType: capturedImage.mediaType } : undefined,
+        drive_image_link,
+      });
+      setQueuedCount(queueSize());
+      setSuccessData({
+        trnx_ref: editedScan?.trnx_ref,
+        flags: [],
+        mode: isAuthorize ? 'authorized' : 'collected',
+        queued: true,
+      });
+      setScreen('success');
     }
   };
 
@@ -241,10 +343,27 @@ export default function App() {
       showToast('Please select your name first.');
       return;
     }
+    const op = { sheetName: selectedPending.sheetName, rowNum: selectedPending.rowNum, stores_employee: employee };
+
+    if (!navigator.onLine) {
+      enqueue('markCollected', op);
+      setQueuedCount(queueSize());
+      setSuccessData({ flags: [], mode: 'collected', customer_name: selectedPending.customer_name, queued: true });
+      setScreen('success');
+      return;
+    }
+
     setProcessingText('Marking as collected…');
     setScreen('processing');
-    const res = await markCollected(selectedPending.sheetName, selectedPending.rowNum, employee);
+    const res = await markCollected(op.sheetName, op.rowNum, op.stores_employee);
     if (!res?.ok) {
+      if (res?.error?.startsWith('Network') || res?.error?.startsWith('Read')) {
+        enqueue('markCollected', op);
+        setQueuedCount(queueSize());
+        setSuccessData({ flags: [], mode: 'collected', customer_name: selectedPending.customer_name, queued: true });
+        setScreen('success');
+        return;
+      }
       showToast(res?.error || 'Failed to mark collected.');
       setScreen('verify');
       return;
@@ -299,6 +418,9 @@ export default function App() {
     <>
       {screen === 'home' && (
         <HomeScreen
+          isOnline={isOnline}
+          queuedCount={queuedCount}
+          onSync={trySync}
           onScan={() => { setFlowMode('authorize'); setScreen('scanTypePicker'); }}
           onAuthorize={() => { setFlowMode('collect'); openPendingList(); }}
           onManual={() => { setScanType('handwritten'); setFlowMode('collect'); setScreen('manual'); }}
@@ -405,7 +527,7 @@ export default function App() {
 // ─────────────────────────────────────────────
 // HomeScreen
 // ─────────────────────────────────────────────
-function HomeScreen({ onScan, onAuthorize, onManual }) {
+function HomeScreen({ onScan, onAuthorize, onManual, isOnline = true, queuedCount = 0, onSync }) {
   const cardStyle = {
     display: 'flex', alignItems: 'center', gap: 14,
     padding: '20px 18px', background: 'var(--surface)',
@@ -423,6 +545,25 @@ function HomeScreen({ onScan, onAuthorize, onManual }) {
         <img src="/logo.png" alt="Oloolua Hardware" className="home-logo-img" />
         <p>Stores Collection System</p>
       </div>
+
+      {(!isOnline || queuedCount > 0) && (
+        <div
+          onClick={isOnline && queuedCount > 0 ? onSync : undefined}
+          style={{
+            width: '100%', padding: '10px 14px', borderRadius: 12,
+            background: isOnline ? 'rgba(212,175,55,0.12)' : 'rgba(220,53,69,0.12)',
+            border: `1px solid ${isOnline ? 'rgba(212,175,55,0.4)' : 'rgba(220,53,69,0.4)'}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            fontSize: 13, color: 'var(--text)', cursor: isOnline && queuedCount > 0 ? 'pointer' : 'default',
+          }}
+        >
+          <span>
+            {!isOnline ? '📡 Offline' : '🔄 Online'}
+            {queuedCount > 0 && ` · ${queuedCount} queued`}
+          </span>
+          {isOnline && queuedCount > 0 && <span style={{ fontSize: 12, color: 'var(--gold)' }}>Tap to sync</span>}
+        </div>
+      )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
         <button style={cardStyle} onClick={onScan}>
@@ -1022,10 +1163,16 @@ function HandwrittenItemsTable({ items }) {
 function SuccessScreen({ data, onScanAnother }) {
   const sheetUrl = data?.sheetUrl || 'https://docs.google.com/spreadsheets/d/1b0YP4BfiPYAtN-zH6VkLWE0Uo-eI-MGQFSNad1JYFhg/edit';
   const isAuthorized = data?.mode === 'authorized';
+  const isQueued = data?.queued;
   return (
     <div className="screen success-screen">
-      <div className="success-icon">{isAuthorized ? '🔒' : '✅'}</div>
-      <h2 className="success-title">{isAuthorized ? 'Authorized!' : 'Saved!'}</h2>
+      <div className="success-icon">{isQueued ? '📡' : isAuthorized ? '🔒' : '✅'}</div>
+      <h2 className="success-title">{isQueued ? 'Queued' : (isAuthorized ? 'Authorized!' : 'Saved!')}</h2>
+      {isQueued && (
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', maxWidth: 280 }}>
+          You're offline. This will sync automatically when your connection returns.
+        </p>
+      )}
       {isAuthorized && (
         <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', maxWidth: 280 }}>
           The store will verify the customer's note against your photo before issuing goods.
@@ -1046,17 +1193,19 @@ function SuccessScreen({ data, onScanAnother }) {
           ⚠️ {data.flags.join(' · ')}
         </p>
       )}
-      <a
-        href={sheetUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        style={{
-          fontSize: '13px', color: 'var(--gold)', textDecoration: 'underline',
-          textAlign: 'center', marginTop: 4,
-        }}
-      >
-        📄 Open in Google Sheets{data?.sheetName ? ` (${data.sheetName})` : ''}
-      </a>
+      {!isQueued && (
+        <a
+          href={sheetUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            fontSize: '13px', color: 'var(--gold)', textDecoration: 'underline',
+            textAlign: 'center', marginTop: 4,
+          }}
+        >
+          📄 Open in Google Sheets{data?.sheetName ? ` (${data.sheetName})` : ''}
+        </a>
+      )}
       <button className="btn-scan" onClick={onScanAnother} style={{ marginTop: 20 }}>
         <span>📷</span> Scan Another
       </button>
