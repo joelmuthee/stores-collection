@@ -342,6 +342,8 @@ function saveScan(payload) {
     updateCustomers(ss, scan.customer_name, now);
   }
 
+  if (statusValue === 'Pending') invalidatePendingCache();
+
   return { ok: true, saved: true, flags, sheetUrl, sheetName: dailyTab.getName() };
 }
 
@@ -586,35 +588,52 @@ function getMonthSummary(payload) {
 //            salesperson, item_summary, drive_image_link, sale_date, notes }] }
 
 function getPendingCollections() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get('pendingCollections');
+  if (cached) return JSON.parse(cached);
+
   const ss = getSheet();
-  const sheets = ss.getSheets();
-  const pattern = /^[A-Za-z]+ \d{4}$/;
+  const tz = Session.getScriptTimeZone();
+  const now = new Date();
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const candidateNames = [
+    Utilities.formatDate(now, tz, 'MMMM yyyy'),
+    Utilities.formatDate(prev, tz, 'MMMM yyyy'),
+  ];
+
   const pending = [];
-  for (const sheet of sheets) {
-    if (!pattern.test(sheet.getName())) continue;
-    if (sheet.getLastRow() <= 1) continue;
+  for (const name of candidateNames) {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet || sheet.getLastRow() <= 1) continue;
     const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, DAILY_HEADERS.length).getValues();
-    data.forEach((row, i) => {
-      if (row[14] === 'Pending') {
-        pending.push({
-          sheetName: sheet.getName(),
-          rowNum: i + 2,
-          timestamp: row[0],
-          receipt_type: row[1],
-          trnx_ref: row[2],
-          customer_name: row[4],
-          salesperson: row[5],
-          sale_date: row[7],
-          item_summary: row[12],
-          drive_image_link: row[15],
-          notes: row[16],
-        });
-      }
-    });
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      if (row[14] !== 'Pending') continue;
+      pending.push({
+        sheetName: name,
+        rowNum: i + 2,
+        timestamp: row[0],
+        receipt_type: row[1],
+        trnx_ref: row[2],
+        customer_name: row[4],
+        salesperson: row[5],
+        sale_date: row[7],
+        item_summary: row[12],
+        drive_image_link: row[15],
+        notes: row[16],
+      });
+    }
   }
-  // Most recent first
   pending.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
-  return { ok: true, pending };
+
+  const result = { ok: true, pending };
+  cache.put('pendingCollections', JSON.stringify(result), 30); // 30s cache
+  return result;
+}
+
+// Bust the pending cache when records change
+function invalidatePendingCache() {
+  CacheService.getScriptCache().remove('pendingCollections');
 }
 
 // ============================================================
@@ -654,6 +673,7 @@ function markCollected(payload) {
   sheet.getRange(rowNum, 11).setValue(timeGap);                      // K: Time Gap
   sheet.getRange(rowNum, 15).setValue('Collected');                  // O: Status
 
+  invalidatePendingCache();
   const sheetUrl = ss.getUrl() + '#gid=' + sheet.getSheetId() + '&range=A' + rowNum;
   return { ok: true, collected: true, sheetUrl, sheetName };
 }
