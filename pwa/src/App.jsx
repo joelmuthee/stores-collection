@@ -280,6 +280,10 @@ export default function App() {
           editedScan={editedScan}
           image={capturedImage?.dataUrl}
           employee={employee}
+          onEmployeeChange={(name) => {
+            setEmployee(name);
+            name ? localStorage.setItem('employee', name) : localStorage.removeItem('employee');
+          }}
           staffList={staffList}
           dupeBanner={dupeBanner}
           notes={notes}
@@ -407,8 +411,10 @@ function ProcessingScreen({ image, text }) {
 // ─────────────────────────────────────────────
 // ReviewScreen
 // ─────────────────────────────────────────────
+const STORES_EMPLOYEES = ["King'ori", 'Maurine', 'Njoroge', 'Joel', 'Irene'];
+
 function ReviewScreen({
-  scan, editedScan, image, employee, staffList,
+  scan, editedScan, image, employee, onEmployeeChange, staffList,
   dupeBanner, notes, onNotesChange,
   partialPickup, onPartialPickupChange,
   onFieldChange, onItemChange,
@@ -495,11 +501,22 @@ function ReviewScreen({
           <span>Partial pickup <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>(customer collecting balance later)</span></span>
         </label>
 
-        {employee && (
-          <p style={{ textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)', paddingBottom: 4 }}>
-            Submitting as <strong style={{ color: 'var(--gold)' }}>{employee}</strong>
-          </p>
-        )}
+        <div className="card">
+          <div className="card-title">Stores Employee</div>
+          <div className="field-row">
+            <select
+              className="field-input"
+              value={employee}
+              onChange={e => onEmployeeChange(e.target.value)}
+              style={{ width: '100%' }}
+            >
+              <option value="">— Select your name —</option>
+              {STORES_EMPLOYEES.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       <div className="bottom-bar">
