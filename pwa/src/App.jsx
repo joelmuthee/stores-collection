@@ -498,29 +498,6 @@ function PrintedFields({ scan, conf, onChange, onItemChange, staffList }) {
       <div className="card">
         <div className="card-title">Items</div>
         <ItemsTable items={scan.items || []} onItemChange={onItemChange} conf={conf} />
-        <div className="total-row">
-          <span>Total</span>
-          {conf.total && conf.total !== 'high' ? (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input
-                className={`field-input${conf.total === 'low' ? ' warn' : ''}`}
-                type="number"
-                value={scan.total ?? ''}
-                onChange={e => onChange('total', parseFloat(e.target.value) || 0)}
-                style={{ width: 120, textAlign: 'right' }}
-              />
-              <ConfBadge level={conf.total} />
-            </span>
-          ) : (
-            <span>KSh {Number(scan.total ?? 0).toLocaleString()}</span>
-          )}
-        </div>
-        {scan.discount > 0 && (
-          <div className="field-row">
-            <span className="field-label">Discount</span>
-            <span className="field-value">KSh {Number(scan.discount).toLocaleString()}</span>
-          </div>
-        )}
       </div>
     </>
   );
