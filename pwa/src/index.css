@@ -4,16 +4,17 @@
 
 :root {
   --maroon: #800000;
-  --maroon-dark: #5a0000;
-  --maroon-light: #a00000;
+  --maroon-dark: #4B0000;
+  --maroon-light: #A52A2A;
   --gold: #D4AF37;
-  --gold-light: #e8c84a;
+  --gold-dark: #AA8C2C;
+  --gold-light: #F4C430;
   --bg: #121212;
   --surface: #1e1e1e;
   --surface2: #2a2a2a;
   --border: #333;
-  --text: #e0e0e0;
-  --text-muted: #888;
+  --text: #F5F5F5;
+  --text-muted: #B0B0B0;
   --text-dim: #aaa;
   --warn: #e0a020;
   --danger: #d93025;
