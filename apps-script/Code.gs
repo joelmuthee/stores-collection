@@ -909,6 +909,10 @@ function migration_addMuteti() {
   addStaffIfMissing('Muteti', 'Salesperson');
 }
 
+function migration_addJoelSalesperson() {
+  addStaffIfMissing('Joel', 'Salesperson');
+}
+
 // ============================================================
 // ONE-TIME SETUP — run this manually once from the editor
 // ============================================================
@@ -942,6 +946,7 @@ function setupSheet() {
     ['Eunice',   'Salesperson', true],
     ["King'ori", 'Salesperson', true],
     ['Muteti',   'Salesperson', true],
+    ['Joel',     'Salesperson', true],
     ['Employee', 'Stores',      true],
     ['Owner',    'Owner',       true],
   ]);
